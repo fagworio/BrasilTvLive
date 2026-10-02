@@ -41,7 +41,7 @@ function removeProviderView(reason = 'closed') {
 
 function continuePendingProviderChannel(navigatedUrl) {
   const pending = providerState;
-  if (pending?.providerId !== 'recordplus' || !pending.channelUrl || pending.status === 'player') return;
+  if (pending?.providerId !== 'recordplus' || !pending.channelUrl || !pending.channelUrl.includes('/player/') || pending.status === 'player') return;
 
   let parsedUrl;
   try {
@@ -106,10 +106,11 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
     });
     const handleProviderNavigation = (_event, navigatedUrl) => {
       const isPlayer = navigatedUrl.includes('/player/');
+      const isHome = ['/', '/home'].includes(new URL(navigatedUrl).pathname);
       sendProviderState({
         ...(providerState || {}),
         providerId,
-        status: isPlayer ? 'player' : providerState?.status || 'open',
+        status: isPlayer ? 'player' : isHome ? 'ready' : providerState?.status || 'open',
         currentUrl: navigatedUrl,
       });
       if (!isPlayer) continuePendingProviderChannel(navigatedUrl);

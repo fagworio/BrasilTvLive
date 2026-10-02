@@ -686,9 +686,10 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
   const isDesktopProvider = channel.provider === 'recordplus' && Boolean(getDesktopBridge()?.isDesktop);
   const usesExternalSurface = channel.provider === 'recordplus' && !isDesktopProvider;
   const channelUrl = channel.providerUrl || provider?.fallbackUrl;
+  const hasDirectPlayerUrl = Boolean(channel.providerUrl?.includes('/player/'));
   const isThisHandoff = providerHandoff?.providerId === channel.provider
     && providerHandoff?.channelUrl === channelUrl;
-  const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'player'].includes(providerHandoff.status);
+  const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player'].includes(providerHandoff.status);
 
   if (!provider) return null;
 
@@ -699,7 +700,7 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
           <span>{isDesktopProvider
-            ? (desktopSurfaceOpen ? `A superfície oficial do ${provider.label} está aberta dentro do BrasilTvLive.` : isConnected ? `A sessão ${provider.label} está disponível neste desktop.` : `Conecte sua conta ${provider.label} dentro do aplicativo para abrir o live.`)
+            ? (desktopSurfaceOpen ? `A superfície oficial do ${provider.label} está aberta dentro do BrasilTvLive.` : isConnected ? (hasDirectPlayerUrl ? `A sessão ${provider.label} está disponível neste desktop.` : `Sessão ${provider.label} conectada; o player direto deste canal ainda não foi confirmado.`) : `Conecte sua conta ${provider.label} dentro do aplicativo para abrir o live.`)
             : usesExternalSurface
               ? `O player oficial do ${provider.label} abre fora do BrasilTvLive. Use a sessão já autenticada no navegador.`
               : needsReconnect
@@ -713,7 +714,7 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{isThisHandoff && ['open', 'loading'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            }}>{isThisHandoff && ['open', 'loading'].includes(providerHandoff.status) ? (isDesktopProvider ? (hasDirectPlayerUrl ? 'Abrir player no app' : 'Abrir RecordPlus no app') : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? (hasDirectPlayerUrl ? 'Abrir player no app' : 'Abrir RecordPlus no app') : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
@@ -721,6 +722,8 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
               ? isDesktopProvider ? 'Faça o login nesta superfície oficial. Depois volte ao app e abra o canal para carregar o live na mesma sessão.' : 'Depois de entrar e escolher o perfil, use “Abrir player no popup” para manter a mesma sessão.'
               : providerHandoff.status === 'loading'
                 ? 'Carregando a superfície oficial do RecordPlus…'
+              : providerHandoff.status === 'ready'
+                ? hasDirectPlayerUrl ? 'Sessão autenticada. Carregando o canal escolhido…' : 'Sessão autenticada. Este canal ainda não tem uma URL direta de player confirmada.'
               : providerHandoff.status === 'closed'
                 ? isDesktopProvider ? 'A superfície foi fechada. Abra o canal novamente para continuar com a sessão persistente.' : 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
                 : providerHandoff.status === 'player'
@@ -1942,7 +1945,7 @@ function App() {
         return;
       }
       if (!event?.providerId) return;
-      if (event.status === 'player') {
+      if (['ready', 'player'].includes(event.status)) {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,
