@@ -738,29 +738,38 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
 
   if (!provider) return null;
 
+  if (isDesktopProvider && desktopSurfaceOpen) {
+    return <div ref={surfaceRef} className={`provider-surface ${className || ''}`} aria-label={`${channel.name} — player oficial aberto`} />;
+  }
+
   if (!isConnected || usesExternalSurface || isDesktopProvider) {
+    const showDesktopActions = !isDesktopProvider || !isConnected || desktopSurfaceOpen;
     return (
       <div ref={surfaceRef} className={`provider-surface ${className || ''}`}>
         <div className="provider-surface-card">
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
           <span>{isDesktopProvider
-            ? (desktopSurfaceOpen ? `A superfície oficial do ${provider.label} está aberta dentro do BrasilTvLive.` : isConnected ? (hasDirectPlayerUrl ? `A sessão ${provider.label} está disponível neste desktop.` : `Sessão ${provider.label} conectada; o player direto deste canal ainda não foi confirmado.`) : `Conecte sua conta ${provider.label} dentro do aplicativo para abrir o live.`)
+            ? (desktopSurfaceOpen ? `A superfície oficial do ${provider.label} está aberta dentro do BrasilTvLive.` : isConnected ? 'Abrindo o canal ao vivo dentro do BrasilTvLive…' : `Conecte sua conta ${provider.label} dentro do aplicativo para abrir o live.`)
             : usesExternalSurface
               ? `O player oficial do ${provider.label} abre fora do BrasilTvLive. Use a sessão já autenticada no navegador.`
               : needsReconnect
                 ? `Sua sessão ${provider.label} precisa ser reconectada.`
                 : `Este canal exige uma conta ${provider.label}.`}</span>
-          {usesExternalSurface || isDesktopProvider ? <div className="provider-handoff-actions">
+          {usesExternalSurface || (isDesktopProvider && showDesktopActions) ? <div className="provider-handoff-actions">
             {onOpenProviderLogin && <button type="button" onClick={(event) => {
               event.stopPropagation();
+              if (isThisHandoff && ['ready', 'player'].includes(providerHandoff.status)) {
+                onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: true });
+                return;
+              }
               if (isThisHandoff && ['open', 'loading'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name });
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{isThisHandoff && ['open', 'loading'].includes(providerHandoff.status) ? (isDesktopProvider ? (hasDirectPlayerUrl ? 'Abrir player no app' : 'Abrir RecordPlus no app') : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? (hasDirectPlayerUrl ? 'Abrir player no app' : 'Abrir RecordPlus no app') : 'Abrir login no app') : 'Abrir login no PC')}</button>}
-            <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>
+            }}>{isThisHandoff && ['open', 'loading', 'ready', 'player'].includes(providerHandoff.status) ? (isDesktopProvider ? (hasDirectPlayerUrl ? 'Abrir player no app' : 'Abrir RecordPlus no app') : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? (hasDirectPlayerUrl ? 'Abrir player no app' : 'Abrir RecordPlus no app') : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            {(!isDesktopProvider || !isConnected) && <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>}
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
             {providerHandoff.status === 'open'
@@ -775,7 +784,7 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
                   ? isDesktopProvider ? 'O player oficial está aberto dentro do BrasilTvLive.' : 'O player foi aberto na mesma janela do RecordPlus.'
               : providerHandoff.status === 'auth-required'
                 ? 'O RecordPlus solicitou login nesta sessão. Conclua a autenticação para abrir o canal escolhido.'
-                  : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
+                  : isDesktopProvider ? 'Não foi possível carregar o player oficial. Tente abrir o canal novamente.' : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
           </span>}
           <small>{isDesktopProvider
             ? 'A sessão fica na partição persistente do RecordPlus. O BrasilTvLive não recebe credenciais, cookies ou tokens.'
@@ -1706,6 +1715,9 @@ function App() {
   });
   const heroVideoRef = useRef(null);
   const activeChannel = channels[activeChannelIndex];
+  const activeProviderStatus = activeChannel?.provider
+    ? providerAccounts[activeChannel.provider]?.status
+    : null;
   const previousProgramRef = useRef(remote.selectedProgram);
 
   const openRegionDialog = () => {
@@ -1786,9 +1798,10 @@ function App() {
     }, 700);
   };
 
-  const openProviderChannel = ({ providerId, channelUrl, channelName }) => {
+  const openProviderChannel = ({ providerId, channelUrl, channelName, watch = true }) => {
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
+      setIsWatching(watch);
       providerTargetRef.current = { providerId, channelUrl, channelName };
       const nextHandoff = { providerId, channelUrl, channelName, status: 'player', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
@@ -1827,6 +1840,29 @@ function App() {
     desktop.closeProviderSurface?.();
     setProviderHandoff(null);
   };
+
+  useEffect(() => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.isDesktop || activeChannel?.playbackType !== 'provider' || activeProviderStatus !== PROVIDER_STATUS.CONNECTED) return;
+
+    const channelUrl = activeChannel.providerUrl || accountProviders[activeChannel.provider]?.fallbackUrl;
+    if (!channelUrl) return;
+    const currentTarget = providerTargetRef.current;
+    if (currentTarget?.providerId === activeChannel.provider && currentTarget.channelUrl === channelUrl) return;
+
+    openProviderChannel({
+      providerId: activeChannel.provider,
+      channelUrl,
+      channelName: activeChannel.name,
+      watch: false,
+    });
+  }, [activeChannel?.id, activeChannel?.name, activeChannel?.provider, activeChannel?.providerUrl, activeChannel?.playbackType, activeProviderStatus, region?.regionId]);
+
+  useEffect(() => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.isDesktop || activeChannel?.provider !== 'recordplus') return;
+    desktop.setProviderAudioMuted?.(!isWatching || isMuted);
+  }, [activeChannel?.provider, isMuted, isWatching, providerHandoff?.status]);
 
   const handleProviderDisconnect = (providerId) => {
     setProviderAccounts((currentAccounts) => {
@@ -1910,7 +1946,6 @@ function App() {
     if (selectedChannel?.playbackType === 'external') return;
     if (selectedChannel?.playbackType === 'provider') {
       if (!isDesktopProviderChannel(selectedChannel)) return;
-      setIsWatching(true);
       setIsPlayerLoading(false);
       setPlayerError(false);
       setShowChannelNotice(false);
@@ -1918,8 +1953,10 @@ function App() {
       const channelUrl = selectedChannel.providerUrl || provider?.fallbackUrl;
       const isConnected = providerAccounts[selectedChannel.provider]?.status === PROVIDER_STATUS.CONNECTED;
       if (isConnected) {
-        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name });
+        setIsWatching(true);
+        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name, watch: true });
       } else {
+        setIsWatching(false);
         openProviderLogin({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name });
       }
       return;
@@ -2046,7 +2083,6 @@ function App() {
           writeStoredProviderAccounts(nextAccounts);
           return nextAccounts;
         });
-        if (isCurrentProviderTarget) setIsWatching(true);
       }
       if (event.status === 'auth-required') {
         setProviderAccounts((currentAccounts) => {

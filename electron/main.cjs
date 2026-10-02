@@ -62,6 +62,11 @@ function removeProviderView(reason = 'closed') {
 
 function hideProviderView(reason = 'hidden') {
   if (!providerView) return providerState;
+  if (reason === 'back') {
+    sendProviderState({ ...(providerState || {}), status: 'player', reason });
+    mainWindow?.webContents.focus();
+    return providerState;
+  }
   applyProviderBounds({ visible: false });
   sendProviderState({ ...(providerState || {}), status: 'hidden', reason });
   mainWindow?.webContents.focus();
@@ -287,6 +292,11 @@ ipcMain.handle('provider:close', () => {
 ipcMain.handle('provider:set-bounds', (_event, bounds) => {
   applyProviderBounds(bounds);
   return lastProviderBounds;
+});
+ipcMain.handle('provider:set-audio-muted', (_event, muted) => {
+  if (!providerView || providerView.webContents.isDestroyed()) return false;
+  providerView.webContents.setAudioMuted(Boolean(muted));
+  return true;
 });
 
 app.whenReady().then(createWindow).catch((error) => {
