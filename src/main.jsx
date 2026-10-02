@@ -1114,7 +1114,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
   }, [channel.streamUrl, isExternal, isProvider, isEmbed, isWatching, isMuted, volume, videoRef]);
 
   return (
-    <section className="hero" aria-label="Programa atual" onMouseEnter={revealControls} onMouseMove={revealControls} onMouseLeave={hideControls}>
+    <section className={`hero ${providerNeedsLogin ? 'provider-login-layout' : ''}`} aria-label="Programa atual" onMouseEnter={revealControls} onMouseMove={revealControls} onMouseLeave={hideControls}>
       <div className="hero-art" />
       {isExternal ? (
         <div className="hero-external-card">
@@ -1155,14 +1155,14 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
         <h1>{programName}</h1>
         <div className="program-meta"><span>{programTime}</span><i /> <span>Hoje, 15 de ago.</span></div>
         <p className="program-description">As principais notícias do Brasil e do mundo, com análises e reportagens especiais sobre política, economia, cultura e sociedade.</p>
-        {providerNeedsLogin && <div className="provider-login-prompt" role="status">
-          <span className="provider-login-prompt-kicker">Acesso necessário</span>
-          <strong>Faça login para assistir</strong>
-          <span>Conecte sua conta {providerLabel} para abrir {channel.name} ao vivo.</span>
-          {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId: channel.provider, channelUrl: channel.providerUrl, channelName: channel.name })}>Entrar para assistir</button>}
-        </div>}
         {channel.regionalUnavailable && <p className="regional-channel-note" role="status">{channel.regionalLabel} sem transmissão oficial regional disponível. Reproduzindo o sinal nacional da {channel.networkLabel || 'emissora'}.</p>}
       </div>
+      {providerNeedsLogin && <div className="provider-login-column" role="status">
+        <span className="provider-login-prompt-kicker">Acesso necessário</span>
+        <strong>Faça login para assistir</strong>
+        <span>Conecte sua conta {providerLabel} para abrir {channel.name} ao vivo.</span>
+        {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId: channel.provider, channelUrl: channel.providerUrl, channelName: channel.name })}>Entrar para assistir</button>}
+      </div>}
       <div className="hero-fade" />
       <div className={`watch-transition ${!isWatching || (!isPlayerLoading && !showChannelNotice && !playerError) ? 'is-hidden' : ''}`} role="status" aria-live="polite">
         <div className={`watch-transition-card ${playerError ? 'is-error' : ''}`}>
