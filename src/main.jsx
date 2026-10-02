@@ -674,12 +674,15 @@ function EmbedSurface({ channel, className, isWatching, volume, isMuted, onPlayb
   return <SpallaSurface channel={channel} className={className} isWatching={isWatching} volume={volume} isMuted={isMuted} onPlaybackStarted={onPlaybackStarted} onPlaybackError={onPlaybackError} />;
 }
 
-function ProviderSurface({ channel, account, className, onOpenAccounts }) {
+function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
   const provider = accountProviders[channel.provider];
   const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
   const isConnected = status === PROVIDER_STATUS.CONNECTED;
   const needsReconnect = status === PROVIDER_STATUS.EXPIRED || status === PROVIDER_STATUS.ERROR;
   const usesExternalSurface = channel.provider === 'recordplus';
+  const channelUrl = channel.providerUrl || provider?.fallbackUrl;
+  const isThisHandoff = providerHandoff?.providerId === channel.provider
+    && providerHandoff?.channelUrl === channelUrl;
 
   if (!provider) return null;
 
@@ -694,8 +697,26 @@ function ProviderSurface({ channel, account, className, onOpenAccounts }) {
             : needsReconnect
               ? `Sua sessão ${provider.label} precisa ser reconectada.`
               : `Este canal exige uma conta ${provider.label}.`}</span>
-          {usesExternalSurface && <a className="provider-channel-link" href={channel.providerUrl || provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>}
-          <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>
+          {usesExternalSurface ? <div className="provider-handoff-actions">
+            {onOpenProviderLogin && <button type="button" onClick={(event) => {
+              event.stopPropagation();
+              if (isThisHandoff && providerHandoff.status === 'open') {
+                onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name });
+                return;
+              }
+              onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
+            }}>{isThisHandoff && providerHandoff.status === 'open' ? 'Abrir player no popup' : 'Abrir login no PC'}</button>}
+            <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>
+          </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
+          {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
+            {providerHandoff.status === 'open'
+              ? 'Depois de entrar e escolher o perfil, use “Abrir player no popup” para manter a mesma sessão.'
+              : providerHandoff.status === 'closed'
+                ? 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
+                : providerHandoff.status === 'player'
+                  ? 'O player foi aberto na mesma janela do RecordPlus.'
+                  : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
+          </span>}
           <small>{usesExternalSurface
             ? 'O login, os cookies e a reprodução permanecem na superfície oficial. O BrasilTvLive não recebe essas credenciais.'
             : 'O login acontece na superfície oficial do provedor. O BrasilTvLive não armazena suas credenciais.'}</small>
@@ -715,11 +736,12 @@ function ProviderSurface({ channel, account, className, onOpenAccounts }) {
   );
 }
 
-function ProviderLoginSurface({ providerId, onClose }) {
+function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, providerHandoff }) {
   const closeButtonRef = useRef(null);
   const provider = accountProviders[providerId];
   const providerUrl = providerId === 'recordplus' ? RECORDPLUS_LOGIN_URL : GLOBO_LIVE_URL;
   const [surfaceState, setSurfaceState] = useState('loading');
+  const isRecordPlusExternal = providerId === 'recordplus';
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -752,7 +774,22 @@ function ProviderLoginSurface({ providerId, onClose }) {
         <button ref={closeButtonRef} type="button" className="provider-login-close" onClick={onClose}>Voltar</button>
       </div>
       <div className="provider-login-frame-wrap">
-        {surfaceState === 'blocked' ? <div className="provider-login-blocked" role="alert">
+        {isRecordPlusExternal ? <div className="provider-login-handoff">
+          <ChannelMark variant={provider.mark} />
+          <strong>Login do RecordPlus no navegador</strong>
+          <span>O login será aberto em uma janela própria. Depois de concluir, volte para o BrasilTvLive e abra o canal oficial.</span>
+          {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId })}>
+            {providerHandoff?.providerId === providerId && providerHandoff.status === 'open' ? 'Login aberto' : 'Abrir login em janela'}
+          </button>}
+          <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir login em nova aba</a>
+          {providerHandoff?.providerId === providerId && <small role="status" aria-live="polite">
+            {providerHandoff.status === 'open'
+              ? 'A janela de login está aberta. A sessão continua no RecordPlus.'
+              : providerHandoff.status === 'closed'
+                ? 'A janela foi fechada. O BrasilTvLive não consegue verificar o login externo.'
+                : 'O popup foi bloqueado; use a nova aba para continuar.'}
+          </small>}
+        </div> : surfaceState === 'blocked' ? <div className="provider-login-blocked" role="alert">
           <ChannelMark variant={provider.mark} />
           <strong>WEB EMBED BLOCKED</strong>
           <span>O RecordPlus permite o login em uma aba própria, mas bloqueou esta superfície dentro do BrasilTvLive.</span>
@@ -769,7 +806,9 @@ function ProviderLoginSurface({ providerId, onClose }) {
         />}
       </div>
       <p className="provider-login-status" role="status" aria-live="polite">
-        {surfaceState === 'blocked'
+        {isRecordPlusExternal
+          ? 'A sessão do RecordPlus permanece no navegador; o BrasilTvLive não recebe cookies ou credenciais.'
+          : surfaceState === 'blocked'
           ? 'O provedor não permitiu carregar a superfície dentro do BrasilTvLive.'
           : surfaceState === 'loaded'
             ? 'Superfície carregada. Faça o login diretamente no provedor, se solicitado.'
@@ -853,7 +892,7 @@ function Sidebar({ focusedNav, selectedNav, onFocus, onSelect, navRefs }) {
   );
 }
 
-function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError, providerAccounts, onOpenAccounts }) {
+function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError, providerAccounts, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
   const [programName, programTime] = channel.programs[0];
   const isExternal = channel.playbackType === 'external';
   const isProvider = channel.playbackType === 'provider';
@@ -930,7 +969,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
           <a href={channel.externalUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${externalProviderLabel} para ${channel.name}`}>Abrir no {externalProviderLabel}</a>
         </div>
       ) : isProvider ? (
-        <ProviderSurface channel={channel} account={providerAccounts?.[channel.provider]} className="hero-provider-surface" onOpenAccounts={onOpenAccounts} />
+        <ProviderSurface channel={channel} account={providerAccounts?.[channel.provider]} className="hero-provider-surface" onOpenAccounts={onOpenAccounts} onOpenProviderLogin={onOpenProviderLogin} onOpenProviderChannel={onOpenProviderChannel} providerHandoff={providerHandoff} />
       ) : isEmbed ? (
         <EmbedSurface
           channel={channel}
@@ -1465,7 +1504,7 @@ function ProviderAccountCard({ provider, account, onConnect, onDisconnect }) {
   );
 }
 
-function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess, providerAccounts, onConnectProvider, onDisconnectProvider, accountNotice, activeProviderLogin, onCloseProviderLogin }) {
+function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess, providerAccounts, onConnectProvider, onDisconnectProvider, accountNotice, activeProviderLogin, onCloseProviderLogin, onOpenProviderLogin, providerHandoff }) {
   const selectRef = useRef(null);
   const stationSummary = getRegionalStationSummary(selectedRegionId);
 
@@ -1501,7 +1540,7 @@ function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegion
               <p>As sessões pertencem aos provedores. O BrasilTvLive não armazena senhas, tokens ou cookies.</p>
             </div>
           </div>
-          {activeProviderLogin ? <ProviderLoginSurface providerId={activeProviderLogin} onClose={onCloseProviderLogin} /> : <div className="provider-account-list">
+          {activeProviderLogin ? <ProviderLoginSurface providerId={activeProviderLogin} onClose={onCloseProviderLogin} onOpenProviderLogin={onOpenProviderLogin} providerHandoff={providerHandoff} /> : <div className="provider-account-list">
             {Object.values(accountProviders).map((provider) => <ProviderAccountCard
               key={provider.id}
               provider={provider}
@@ -1574,6 +1613,7 @@ function App() {
   const [providerAccounts, setProviderAccounts] = useState(() => readStoredProviderAccounts());
   const [accountNotice, setAccountNotice] = useState(null);
   const [activeProviderLogin, setActiveProviderLogin] = useState(null);
+  const [providerHandoff, setProviderHandoff] = useState(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState(0);
   const [isWatching, setIsWatching] = useState(false);
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
@@ -1588,6 +1628,8 @@ function App() {
   const volumeRef = useRef(0.6);
   const volumeNoticeTimerRef = useRef(null);
   const channelNoticeTimerRef = useRef(null);
+  const providerPopupTimerRef = useRef(null);
+  const providerPopupRef = useRef(null);
   const channels = getChannelsForRegion(region?.regionId || regionOptions[0].regionId);
   const remote = useTvRemoteController({
     channels,
@@ -1634,6 +1676,56 @@ function App() {
       return;
     }
     setAccountNotice(`O login oficial de ${provider.label} será habilitado na próxima etapa. Nenhuma credencial é armazenada pelo BrasilTvLive.`);
+  };
+
+  const openProviderLogin = ({ providerId, channelUrl = null, channelName = null }) => {
+    const provider = accountProviders[providerId];
+    if (!provider?.fallbackUrl) return;
+
+    window.clearInterval(providerPopupTimerRef.current);
+    const popup = window.open(
+      provider.fallbackUrl,
+      `brasiltvlive-${providerId}-login`,
+      'popup=yes,width=520,height=760,resizable=yes,scrollbars=yes',
+    );
+    setProviderHandoff({
+      providerId,
+      channelUrl,
+      channelName,
+      status: popup ? 'open' : 'blocked',
+    });
+    if (!popup) return;
+
+    providerPopupRef.current = popup;
+    popup.focus?.();
+    providerPopupTimerRef.current = window.setInterval(() => {
+      if (!popup.closed) return;
+      window.clearInterval(providerPopupTimerRef.current);
+      providerPopupRef.current = null;
+      setProviderHandoff((current) => current?.providerId === providerId
+        ? { ...current, status: 'closed' }
+        : current);
+    }, 700);
+  };
+
+  const openProviderChannel = ({ providerId, channelUrl, channelName }) => {
+    const popup = providerPopupRef.current;
+    if (popup && !popup.closed) {
+      popup.location.href = channelUrl;
+      popup.focus?.();
+      setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
+        ? { ...current, channelName, status: 'player' }
+        : current);
+      return;
+    }
+
+    const playerWindow = window.open(
+      channelUrl,
+      `brasiltvlive-${providerId}-player`,
+      'popup=yes,width=1100,height=760,resizable=yes,scrollbars=yes',
+    );
+    setProviderHandoff({ providerId, channelUrl, channelName, status: playerWindow ? 'player' : 'blocked' });
+    playerWindow?.focus?.();
   };
 
   const handleProviderDisconnect = (providerId) => {
@@ -1802,6 +1894,7 @@ function App() {
   useEffect(() => () => {
     window.clearTimeout(volumeNoticeTimerRef.current);
     window.clearTimeout(channelNoticeTimerRef.current);
+    window.clearInterval(providerPopupTimerRef.current);
   }, []);
 
   const handlePlaybackReady = (channelId) => {
@@ -1856,6 +1949,9 @@ function App() {
               onPlaybackError={handlePlaybackError}
               providerAccounts={providerAccounts}
               onOpenAccounts={openRegionDialog}
+              onOpenProviderLogin={isMobile ? undefined : openProviderLogin}
+              onOpenProviderChannel={isMobile ? undefined : openProviderChannel}
+              providerHandoff={providerHandoff}
             />
             <Epg
               channels={channels}
@@ -1887,6 +1983,8 @@ function App() {
         accountNotice={accountNotice}
         activeProviderLogin={activeProviderLogin}
         onCloseProviderLogin={() => setActiveProviderLogin(null)}
+        onOpenProviderLogin={isMobile ? undefined : openProviderLogin}
+        providerHandoff={providerHandoff}
       />}
     </>
   );

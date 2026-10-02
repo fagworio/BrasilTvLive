@@ -105,6 +105,8 @@ button { font: inherit; }
 .provider-surface-card small { color: #8492a2; font-size: 10px; line-height: 1.45; }
 .provider-channel-link { min-height: 36px; display: inline-flex; align-items: center; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; text-decoration: none; }
 .provider-channel-link:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
+.provider-handoff-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.provider-handoff-note { color: #b8c8d8 !important; font-size: 10px !important; }
 .provider-surface-card button { min-height: 36px; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; cursor: pointer; }
 .provider-surface-card button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .region-dialog-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(4,8,14,.72); backdrop-filter: blur(8px); }
@@ -155,6 +157,13 @@ button { font: inherit; }
 .provider-login-blocked small { color: #94a2b2; }
 .provider-login-fallback { padding: 8px 11px; border-radius: 8px; color: #06130b; background: #2be985; font-size: 10px; font-weight: 800; text-decoration: none; }
 .provider-login-fallback:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
+.provider-login-handoff { display: grid; justify-items: start; align-content: center; gap: 10px; min-height: 270px; padding: 24px; color: #f7f9fb; background: linear-gradient(145deg, rgba(29,67,54,.55), rgba(10,16,24,.95)); }
+.provider-login-handoff .channel-mark { width: 42px; height: 42px; }
+.provider-login-handoff strong { font-size: 14px; }
+.provider-login-handoff span, .provider-login-handoff small { color: #c7d0db; font-size: 11px; line-height: 1.45; }
+.provider-login-handoff small { color: #94a2b2; }
+.provider-login-handoff button { min-height: 36px; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; cursor: pointer; }
+.provider-login-handoff button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .provider-login-status { margin: 0 !important; color: #c9d4df !important; font-size: 11px !important; }
 .provider-login-privacy { color: #8492a2; font-size: 10px; line-height: 1.45; }
 .region-dialog-error { margin-top: 13px !important; margin-bottom: 0 !important; color: #ff9aa5 !important; }
