@@ -39,6 +39,15 @@ function focusProviderView() {
   if (providerView && !providerView.webContents.isDestroyed()) providerView.webContents.focus();
 }
 
+function applyProviderVideoPresentation() {
+  if (!providerView || providerView.webContents.isDestroyed()) return;
+  providerView.webContents.insertCSS(`
+    video {
+      object-fit: cover !important;
+    }
+  `).catch(() => {});
+}
+
 function sendAppState(nextState) {
   if (appView && !appView.webContents.isDestroyed()) appView.webContents.send('provider:state', nextState);
 }
@@ -193,6 +202,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
         currentUrl,
       });
     });
+    providerView.webContents.on('did-finish-load', applyProviderVideoPresentation);
     const handleProviderNavigation = (_event, navigatedUrl) => {
       const isPlayer = navigatedUrl.includes('/player/');
       let isHome = false;
