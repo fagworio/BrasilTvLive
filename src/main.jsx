@@ -210,9 +210,9 @@ const recordNationalChannel = {
   id: 'record',
   name: 'RECORD Nacional',
   mark: 'record',
-  playbackType: 'external',
-  externalProviderLabel: 'RecordPlus',
-  externalUrl: RECORDPLUS_LIVE_URL,
+  playbackType: 'provider',
+  provider: 'recordplus',
+  providerUrl: RECORDPLUS_LIVE_URL,
   sourceUrl: RECORDPLUS_LIVE_URL,
   authRequired: true,
   networkLabel: 'RECORD',
@@ -325,11 +325,14 @@ function getChannelsForRegion(regionId) {
     id: region.regionId === 'mg-bh' ? 'globo-minas' : `globo-${region.regionId}`,
     name: globoRegionalCatalog[region.regionId]?.label || 'Globo regional',
     mark: 'globo',
-    playbackType: 'external',
-    externalUrl: GLOBO_LIVE_URL,
-    externalProviderLabel: 'Globoplay',
+    playbackType: 'provider',
+    provider: 'globoplay',
+    providerUrl: GLOBO_LIVE_URL,
+    authRequired: true,
+    sourceUrl: GLOBO_LIVE_URL,
+    networkLabel: 'GLOBO',
     regionId: region.regionId,
-    programs: [['Globo ao vivo', 'Disponível no Globoplay'], ['Programação local', 'Consulte no Globoplay'], ['Jornal local', 'Consulte no Globoplay']],
+    programs: [['Globo ao vivo', 'Requer Globo / Globoplay'], ['Programação local', 'Consulte no Globoplay'], ['Jornal local', 'Consulte no Globoplay']],
   };
   return [baseChannels[0], createSbtChannel(regionId), sbtNewsChannel, recordNewsChannel, createBandChannel(regionId), createRedeTvChannel(regionId), regionalGlobo, ...baseChannels.slice(1)];
 }
@@ -654,6 +657,39 @@ function EmbedSurface({ channel, className, isWatching, volume, isMuted, onPlayb
   return <SpallaSurface channel={channel} className={className} isWatching={isWatching} volume={volume} isMuted={isMuted} onPlaybackStarted={onPlaybackStarted} onPlaybackError={onPlaybackError} />;
 }
 
+function ProviderSurface({ channel, account, className, onOpenAccounts }) {
+  const provider = accountProviders[channel.provider];
+  const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
+  const isConnected = status === PROVIDER_STATUS.CONNECTED;
+  const needsReconnect = status === PROVIDER_STATUS.EXPIRED || status === PROVIDER_STATUS.ERROR;
+
+  if (!provider) return null;
+
+  if (!isConnected) {
+    return (
+      <div className={`provider-surface ${className || ''}`}>
+        <div className="provider-surface-card">
+          <ChannelMark variant={channel.mark} />
+          <strong>{channel.name}</strong>
+          <span>{needsReconnect ? `Sua sessão ${provider.label} precisa ser reconectada.` : `Este canal exige uma conta ${provider.label}.`}</span>
+          <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>
+          <small>O login acontece na superfície oficial do provedor. O BrasilTvLive não armazena suas credenciais.</small>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <iframe
+      className={`provider-surface ${className || ''}`}
+      src={channel.providerUrl}
+      title={`${channel.name} — ${provider.label}`}
+      allow="autoplay; encrypted-media; fullscreen"
+      allowFullScreen
+    />
+  );
+}
+
 function useIsMobileMode() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
 
@@ -727,9 +763,10 @@ function Sidebar({ focusedNav, selectedNav, onFocus, onSelect, navRefs }) {
   );
 }
 
-function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError }) {
+function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError, providerAccounts, onOpenAccounts }) {
   const [programName, programTime] = channel.programs[0];
   const isExternal = channel.playbackType === 'external';
+  const isProvider = channel.playbackType === 'provider';
   const isEmbed = channel.playbackType === 'embed';
   const externalProviderLabel = channel.externalProviderLabel || 'site oficial';
   const externalNotice = channel.authRequired
@@ -786,11 +823,11 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
   }, [isWatching]);
 
   useEffect(() => {
-    if (!videoRef.current || isExternal || isEmbed) return;
+    if (!videoRef.current || isExternal || isProvider || isEmbed) return;
     videoRef.current.volume = volume;
     videoRef.current.muted = !isWatching || isMuted;
     videoRef.current.play().catch(() => {});
-  }, [channel.streamUrl, isExternal, isEmbed, isWatching, isMuted, volume, videoRef]);
+  }, [channel.streamUrl, isExternal, isProvider, isEmbed, isWatching, isMuted, volume, videoRef]);
 
   return (
     <section className="hero" aria-label="Programa atual" onMouseEnter={revealControls} onMouseMove={revealControls} onMouseLeave={hideControls}>
@@ -802,6 +839,8 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
           <span>{externalNotice}</span>
           <a href={channel.externalUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${externalProviderLabel} para ${channel.name}`}>Abrir no {externalProviderLabel}</a>
         </div>
+      ) : isProvider ? (
+        <ProviderSurface channel={channel} account={providerAccounts?.[channel.provider]} className="hero-provider-surface" onOpenAccounts={onOpenAccounts} />
       ) : isEmbed ? (
         <EmbedSurface
           channel={channel}
@@ -827,7 +866,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
         />
       )}
       <div className="hero-content">
-        <div className="live-badge"><span /> {isExternal ? 'GLOBO' : isEmbed ? (channel.networkLabel || 'AO VIVO') : 'AO VIVO'}</div>
+        <div className="live-badge"><span /> {isExternal ? 'GLOBO' : isProvider ? (channel.networkLabel || 'PROVEDOR') : isEmbed ? (channel.networkLabel || 'AO VIVO') : 'AO VIVO'}</div>
         <p className="channel-title">{channel.name}</p>
         <h1>{programName}</h1>
         <div className="program-meta"><span>{programTime}</span><i /> <span>Hoje, 15 de ago.</span></div>
@@ -1064,12 +1103,12 @@ function MobileHeader() {
   );
 }
 
-function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError }) {
+function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError, providerAccounts, onOpenAccounts }) {
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
   const [hasError, setHasError] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isLoading, setIsLoading] = useState(channel.playbackType !== 'external');
+  const [isLoading, setIsLoading] = useState(channel.playbackType !== 'external' && channel.playbackType !== 'provider');
   const [swipeFeedback, setSwipeFeedback] = useState(null);
   const playerRef = useRef(null);
   const videoRef = useRef(null);
@@ -1109,7 +1148,7 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
 
   useEffect(() => {
     setHasError(false);
-    setIsLoading(channel.playbackType !== 'external');
+    setIsLoading(channel.playbackType !== 'external' && channel.playbackType !== 'provider');
   }, [channel.id]);
 
   useEffect(() => () => window.clearTimeout(swipeFeedbackTimerRef.current), []);
@@ -1157,7 +1196,7 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
   const toggleFullscreen = async () => {
     const player = playerRef.current;
     const video = videoRef.current;
-    if (!player || channel.playbackType === 'external') return;
+    if (!player || channel.playbackType === 'external' || channel.playbackType === 'provider') return;
 
     if (document.fullscreenElement) {
       await document.exitFullscreen?.();
@@ -1204,6 +1243,8 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
           <span>{externalNotice}</span>
           <a href={channel.externalUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${externalProviderLabel} para ${channel.name}`}>Abrir no {externalProviderLabel}</a>
         </div>
+      ) : channel.playbackType === 'provider' ? (
+        <ProviderSurface channel={channel} account={providerAccounts?.[channel.provider]} className="mobile-player-provider" onOpenAccounts={onOpenAccounts} />
       ) : channel.playbackType === 'embed' ? (
         <EmbedSurface
           channel={channel}
@@ -1241,7 +1282,7 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
       </div>
       {channel.playbackType === 'embed' && isFullscreen && <div className="mobile-gesture-layer" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd} aria-hidden="true" />}
       {swipeFeedback && <div className="mobile-zap-feedback" role="status" aria-live="polite">{swipeFeedback}</div>}
-      {channel.playbackType !== 'external' && <div className="mobile-player-controls">
+      {channel.playbackType !== 'external' && channel.playbackType !== 'provider' && <div className="mobile-player-controls">
         <span className="mobile-live-badge">{channel.playbackType === 'embed' ? (channel.networkLabel || 'AO VIVO') : 'AO VIVO'}</span>
         <span className="player-spacer" />
         {channel.playbackType !== 'embed' && <button className="mobile-player-button" type="button" aria-label={isPlaying ? 'Pausar' : 'Reproduzir'} onClick={(event) => { event.stopPropagation(); togglePlayback(); }}>
@@ -1393,7 +1434,7 @@ function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegion
   );
 }
 
-function MobileApp({ channels, activeChannelIndex, onSelectChannel, onChannelStep, onOpenRegion, onPlaybackReady, onPlaybackError }) {
+function MobileApp({ channels, activeChannelIndex, onSelectChannel, onChannelStep, onOpenRegion, onPlaybackReady, onPlaybackError, providerAccounts, onOpenAccounts }) {
   const [isFavorite, setIsFavorite] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(0);
   const [activeBottomNav, setActiveBottomNav] = useState(0);
@@ -1407,7 +1448,7 @@ function MobileApp({ channels, activeChannelIndex, onSelectChannel, onChannelSte
   return (
     <main className="mobile-shell">
       <MobileHeader />
-      <MobilePlayer channel={channel} onChannelStep={onChannelStep} onPlaybackReady={onPlaybackReady} onPlaybackError={onPlaybackError} />
+      <MobilePlayer channel={channel} onChannelStep={onChannelStep} onPlaybackReady={onPlaybackReady} onPlaybackError={onPlaybackError} providerAccounts={providerAccounts} onOpenAccounts={onOpenAccounts} />
       <section className="mobile-current-program" aria-label="Canal e programa atuais">
         <div className="mobile-current-channel">
           <ChannelMark variant={channel.mark} />
@@ -1571,7 +1612,7 @@ function App() {
 
   const startViewing = (channelIndex = activeChannelIndex) => {
     const selectedChannel = channels[channelIndex];
-    if (selectedChannel?.playbackType === 'external') return;
+    if (selectedChannel?.playbackType === 'external' || selectedChannel?.playbackType === 'provider') return;
     setIsWatching(true);
     setPlayerError(false);
     setShowChannelNotice(true);
@@ -1607,7 +1648,7 @@ function App() {
     const programChanged = previousProgram.row !== remote.selectedProgram.row || previousProgram.col !== remote.selectedProgram.col;
     previousProgramRef.current = remote.selectedProgram;
     setActiveChannelIndex(remote.selectedProgram.row);
-    if (programChanged && !isMobile && channels[remote.selectedProgram.row]?.playbackType !== 'external') startViewing(remote.selectedProgram.row);
+    if (programChanged && !isMobile && !['external', 'provider'].includes(channels[remote.selectedProgram.row]?.playbackType)) startViewing(remote.selectedProgram.row);
   }, [remote.selectedProgram.row, remote.selectedProgram.col, isMobile, region?.regionId]);
 
   useEffect(() => {
@@ -1642,7 +1683,7 @@ function App() {
   const selectProgram = (row, col) => {
     setActiveChannelIndex(row);
     remote.selectProgram(row, col);
-    if (!isMobile && channels[row]?.playbackType !== 'external') startViewing(row);
+    if (!isMobile && !['external', 'provider'].includes(channels[row]?.playbackType)) startViewing(row);
   };
 
   const selectChannel = (index) => {
@@ -1654,7 +1695,7 @@ function App() {
     const nextIndex = (activeChannelIndex + direction + channels.length) % channels.length;
     setActiveChannelIndex(nextIndex);
     remote.selectProgram(nextIndex, 0);
-    if (!isMobile && channels[nextIndex]?.playbackType !== 'external') startViewing(nextIndex);
+    if (!isMobile && !['external', 'provider'].includes(channels[nextIndex]?.playbackType)) startViewing(nextIndex);
   };
 
   channelStepRef.current = stepChannel;
@@ -1693,7 +1734,7 @@ function App() {
         <span className="app-loading-copy">Carregando transmissão</span>
       </div>
       {volumeNotice && <div className="volume-notice" role="status" aria-live="polite"><span aria-hidden="true">{volumeNotice.muted ? '🔇' : '🔊'}</span> {volumeNotice.label}</div>}
-      {isMobile ? <MobileApp channels={channels} activeChannelIndex={activeChannelIndex} onSelectChannel={selectChannel} onChannelStep={stepChannel} onOpenRegion={openRegionDialog} onPlaybackReady={handlePlaybackReady} onPlaybackError={handlePlaybackError} /> : (
+      {isMobile ? <MobileApp channels={channels} activeChannelIndex={activeChannelIndex} onSelectChannel={selectChannel} onChannelStep={stepChannel} onOpenRegion={openRegionDialog} onPlaybackReady={handlePlaybackReady} onPlaybackError={handlePlaybackError} providerAccounts={providerAccounts} onOpenAccounts={openRegionDialog} /> : (
         <main className={`tv-shell ${isWatching ? 'watching' : ''} ${isWatching && isPlayerLoading ? 'watch-loading' : ''}`}>
           <Sidebar
             focusedNav={remote.focusArea === 'nav' ? remote.focusedNav : -1}
@@ -1716,6 +1757,8 @@ function App() {
               onMuteToggle={toggleMute}
               onPlaybackStarted={handlePlaybackReady}
               onPlaybackError={handlePlaybackError}
+              providerAccounts={providerAccounts}
+              onOpenAccounts={openRegionDialog}
             />
             <Epg
               channels={channels}
