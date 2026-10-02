@@ -103,6 +103,8 @@ button { font: inherit; }
 .provider-surface-card strong { font-size: clamp(16px, 1.4vw, 23px); }
 .provider-surface-card span { color: #c0cad5; font-size: 12px; line-height: 1.45; }
 .provider-surface-card small { color: #8492a2; font-size: 10px; line-height: 1.45; }
+.provider-channel-link { min-height: 36px; display: inline-flex; align-items: center; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; text-decoration: none; }
+.provider-channel-link:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .provider-surface-card button { min-height: 36px; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; cursor: pointer; }
 .provider-surface-card button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .region-dialog-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(4,8,14,.72); backdrop-filter: blur(8px); }

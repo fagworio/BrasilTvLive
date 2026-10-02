@@ -302,6 +302,7 @@ function getRecordRegionalChannel(regionId) {
     regionalLabel: regional.label,
     regionalAvailability: regional.liveAvailability,
     providerUrl: regional.playerUrl || recordNationalChannel.providerUrl,
+    programs: [[regional.label, 'Ao vivo no RecordPlus'], ...recordNationalChannel.programs.slice(1)],
   };
 }
 
@@ -338,7 +339,19 @@ function getChannelsForRegion(regionId) {
     regionId: region.regionId,
     programs: [['Globo ao vivo', 'Requer Globo / Globoplay'], ['Programação local', 'Consulte no Globoplay'], ['Jornal local', 'Consulte no Globoplay']],
   };
-  return [baseChannels[0], createSbtChannel(regionId), sbtNewsChannel, recordNewsChannel, createBandChannel(regionId), createRedeTvChannel(regionId), regionalGlobo, ...baseChannels.slice(1)];
+  const recordRegional = getRecordRegionalChannel(regionId);
+  return [
+    baseChannels[0],
+    createSbtChannel(regionId),
+    sbtNewsChannel,
+    recordNationalChannel,
+    ...(recordRegional ? [recordRegional] : []),
+    recordNewsChannel,
+    createBandChannel(regionId),
+    createRedeTvChannel(regionId),
+    regionalGlobo,
+    ...baseChannels.slice(1),
+  ];
 }
 
 function readStoredRegion() {
@@ -666,18 +679,26 @@ function ProviderSurface({ channel, account, className, onOpenAccounts }) {
   const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
   const isConnected = status === PROVIDER_STATUS.CONNECTED;
   const needsReconnect = status === PROVIDER_STATUS.EXPIRED || status === PROVIDER_STATUS.ERROR;
+  const usesExternalSurface = channel.provider === 'recordplus';
 
   if (!provider) return null;
 
-  if (!isConnected) {
+  if (!isConnected || usesExternalSurface) {
     return (
       <div className={`provider-surface ${className || ''}`}>
         <div className="provider-surface-card">
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
-          <span>{needsReconnect ? `Sua sessão ${provider.label} precisa ser reconectada.` : `Este canal exige uma conta ${provider.label}.`}</span>
+          <span>{usesExternalSurface
+            ? `O player oficial do ${provider.label} abre fora do BrasilTvLive. Use a sessão já autenticada no navegador.`
+            : needsReconnect
+              ? `Sua sessão ${provider.label} precisa ser reconectada.`
+              : `Este canal exige uma conta ${provider.label}.`}</span>
+          {usesExternalSurface && <a className="provider-channel-link" href={channel.providerUrl || provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>}
           <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>
-          <small>O login acontece na superfície oficial do provedor. O BrasilTvLive não armazena suas credenciais.</small>
+          <small>{usesExternalSurface
+            ? 'O login, os cookies e a reprodução permanecem na superfície oficial. O BrasilTvLive não recebe essas credenciais.'
+            : 'O login acontece na superfície oficial do provedor. O BrasilTvLive não armazena suas credenciais.'}</small>
         </div>
       </div>
     );
