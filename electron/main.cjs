@@ -18,16 +18,32 @@ let mainWindow;
 let viteProcess;
 let providerView;
 let providerState = null;
+let lastProviderBounds = null;
 
 function sendProviderState(nextState) {
   providerState = nextState;
   if (!mainWindow?.isDestroyed()) mainWindow.webContents.send('provider:state', nextState);
 }
 
-function providerBounds() {
-  const { width, height } = mainWindow.getContentBounds();
-  const left = Math.round(width * 0.42);
-  return { x: left, y: 0, width: width - left, height };
+function applyProviderBounds(bounds) {
+  if (!providerView || !mainWindow || mainWindow.isDestroyed()) return;
+
+  const [contentWidth, contentHeight] = mainWindow.getContentSize();
+  const isVisible = bounds?.visible !== false;
+  if (!isVisible) {
+    providerView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+    lastProviderBounds = { visible: false };
+    mainWindow.webContents.focus();
+    return;
+  }
+
+  const x = Math.max(0, Math.min(Math.round(bounds?.x || 0), contentWidth));
+  const y = Math.max(0, Math.min(Math.round(bounds?.y || 0), contentHeight));
+  const width = Math.max(0, Math.min(Math.round(bounds?.width || 0), contentWidth - x));
+  const height = Math.max(0, Math.min(Math.round(bounds?.height || 0), contentHeight - y));
+  providerView.setBounds({ x, y, width, height });
+  lastProviderBounds = { visible: width > 0 && height > 0, x, y, width, height };
+  if (width > 0 && height > 0) providerView.webContents.focus();
 }
 
 function removeProviderView(reason = 'closed') {
@@ -36,7 +52,16 @@ function removeProviderView(reason = 'closed') {
     providerView.webContents.close();
     providerView = null;
   }
+  lastProviderBounds = null;
   sendProviderState({ ...(providerState || {}), status: 'closed', reason });
+}
+
+function hideProviderView(reason = 'hidden') {
+  if (!providerView) return providerState;
+  applyProviderBounds({ visible: false });
+  sendProviderState({ ...(providerState || {}), status: 'hidden', reason });
+  mainWindow?.webContents.focus();
+  return providerState;
 }
 
 function continuePendingProviderChannel(navigatedUrl) {
@@ -76,7 +101,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       },
     });
     mainWindow.contentView.addChildView(providerView);
-    providerView.setBounds(providerBounds());
+    applyProviderBounds({ visible: false });
     providerView.webContents.setWindowOpenHandler(() => {
       return {
         action: 'allow',
@@ -102,15 +127,29 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       sendProviderState({ ...(providerState || {}), providerId, status: 'loading' });
     });
     providerView.webContents.on('did-stop-loading', () => {
-      sendProviderState({ ...(providerState || {}), providerId, status: providerState?.status === 'player' ? 'player' : 'open' });
-    });
-    const handleProviderNavigation = (_event, navigatedUrl) => {
-      const isPlayer = navigatedUrl.includes('/player/');
-      const isHome = ['/', '/home'].includes(new URL(navigatedUrl).pathname);
+      const currentUrl = providerView.webContents.getURL();
+      const isLogin = currentUrl.includes('recordplus.com/login');
+      const isPlayer = currentUrl.includes('/player/');
       sendProviderState({
         ...(providerState || {}),
         providerId,
-        status: isPlayer ? 'player' : isHome ? 'ready' : providerState?.status || 'open',
+        status: isLogin ? 'auth-required' : isPlayer || providerState?.status === 'player' ? 'player' : 'open',
+        currentUrl,
+      });
+    });
+    const handleProviderNavigation = (_event, navigatedUrl) => {
+      const isPlayer = navigatedUrl.includes('/player/');
+      let isHome = false;
+      let isLogin = false;
+      try {
+        const pathname = new URL(navigatedUrl).pathname;
+        isHome = ['/', '/home'].includes(pathname);
+        isLogin = pathname.startsWith('/login');
+      } catch { /* provider navigations are expected to be absolute URLs */ }
+      sendProviderState({
+        ...(providerState || {}),
+        providerId,
+        status: isPlayer ? 'player' : isLogin ? 'auth-required' : isHome ? 'ready' : providerState?.status || 'open',
         currentUrl: navigatedUrl,
       });
       if (!isPlayer) continuePendingProviderChannel(navigatedUrl);
@@ -131,7 +170,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       const isBack = input.type === 'keyDown' && ['Escape', 'Backspace', 'BrowserBack', 'GoBack', 'Back'].includes(input.key);
       if (isBack) {
         event.preventDefault();
-        removeProviderView('back');
+        hideProviderView('back');
         return;
       }
       if (input.type === 'keyDown' && input.key === 'ArrowUp') {
@@ -145,7 +184,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
     });
   }
 
-  providerView.setBounds(providerBounds());
+  applyProviderBounds({ visible: false });
   providerState = { providerId, channelUrl, channelName, status: url.includes('/player/') ? 'player' : 'open' };
   providerView.webContents.loadURL(url);
   providerView.webContents.focus();
@@ -213,15 +252,20 @@ async function createWindow() {
   });
   mainWindow.setMenuBarVisibility(false);
 
-  mainWindow.on('resize', () => providerView?.setBounds(providerBounds()));
+  mainWindow.on('resize', () => {
+    if (lastProviderBounds?.visible) applyProviderBounds(lastProviderBounds);
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
   await mainWindow.loadURL(isDevelopment ? devServerUrl : `file://${path.join(projectRoot, 'dist', 'index.html')}`);
 }
 
 ipcMain.handle('provider:open', (_event, payload) => attachProviderView(payload));
 ipcMain.handle('provider:close', () => {
-  removeProviderView('app-request');
-  return providerState;
+  return hideProviderView('app-request');
+});
+ipcMain.handle('provider:set-bounds', (_event, bounds) => {
+  applyProviderBounds(bounds);
+  return lastProviderBounds;
 });
 
 app.whenReady().then(createWindow).catch((error) => {

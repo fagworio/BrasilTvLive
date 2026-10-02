@@ -1,4 +1,4 @@
-import React, { StrictMode, useEffect, useRef, useState } from 'react';
+import React, { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Hls from 'hls.js';
 import {
@@ -679,6 +679,7 @@ function EmbedSurface({ channel, className, isWatching, volume, isMuted, onPlayb
 }
 
 function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
+  const surfaceRef = useRef(null);
   const provider = accountProviders[channel.provider];
   const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
   const isConnected = status === PROVIDER_STATUS.CONNECTED;
@@ -689,13 +690,44 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
   const hasDirectPlayerUrl = Boolean(channel.providerUrl?.includes('/player/'));
   const isThisHandoff = providerHandoff?.providerId === channel.provider
     && providerHandoff?.channelUrl === channelUrl;
-  const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player'].includes(providerHandoff.status);
+  const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
+
+  useLayoutEffect(() => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.setProviderBounds) return undefined;
+
+    const syncBounds = () => {
+      const element = surfaceRef.current;
+      if (!element || !desktopSurfaceOpen) {
+        desktop.setProviderBounds({ visible: false });
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      desktop.setProviderBounds({
+        visible: rect.width > 0 && rect.height > 0,
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+
+    syncBounds();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncBounds);
+    if (surfaceRef.current && observer) observer.observe(surfaceRef.current);
+    window.addEventListener('resize', syncBounds);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', syncBounds);
+      desktop.setProviderBounds({ visible: false });
+    };
+  }, [desktopSurfaceOpen, channel.id]);
 
   if (!provider) return null;
 
   if (!isConnected || usesExternalSurface || isDesktopProvider) {
     return (
-      <div className={`provider-surface ${className || ''}`}>
+      <div ref={surfaceRef} className={`provider-surface ${className || ''}`}>
         <div className="provider-surface-card">
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
@@ -726,8 +758,10 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
                 ? hasDirectPlayerUrl ? 'Sessão autenticada. Carregando o canal escolhido…' : 'Sessão autenticada. Este canal ainda não tem uma URL direta de player confirmada.'
               : providerHandoff.status === 'closed'
                 ? isDesktopProvider ? 'A superfície foi fechada. Abra o canal novamente para continuar com a sessão persistente.' : 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
-                : providerHandoff.status === 'player'
+              : providerHandoff.status === 'player'
                   ? isDesktopProvider ? 'O player oficial está aberto dentro do BrasilTvLive.' : 'O player foi aberto na mesma janela do RecordPlus.'
+              : providerHandoff.status === 'auth-required'
+                ? 'O RecordPlus solicitou login nesta sessão. Conclua a autenticação para abrir o canal escolhido.'
                   : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
           </span>}
           <small>{isDesktopProvider
@@ -1031,7 +1065,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
           {isPlayerLoading && <span className="watch-transition-spinner" aria-hidden="true" />}
         </div>
       </div>
-      <div
+      {!isProvider && <div
         className={`desktop-player-controls ${controlsVisible || (isEmbed && isWatching) ? 'is-visible' : ''}`}
         onMouseEnter={enterControls}
         onMouseMove={revealControls}
@@ -1055,7 +1089,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
           aria-label={`Volume ${Math.round(volume * 100)}%`}
         />
         <output className="desktop-volume-value">{Math.round(volume * 100)}%</output>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1845,9 +1879,31 @@ function App() {
     showVolumeNotice({ muted: nextMuted, label: nextMuted ? 'Mudo' : `Volume ${Math.round(volumeRef.current * 100)}%` });
   };
 
+  const isDesktopProviderChannel = (channel) => Boolean(
+    getDesktopBridge()?.isDesktop && channel?.playbackType === 'provider',
+  );
+
   const startViewing = (channelIndex = activeChannelIndex) => {
     const selectedChannel = channels[channelIndex];
-    if (selectedChannel?.playbackType === 'external' || selectedChannel?.playbackType === 'provider') return;
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) mainContent.scrollTop = 0;
+    if (selectedChannel?.playbackType === 'external') return;
+    if (selectedChannel?.playbackType === 'provider') {
+      if (!isDesktopProviderChannel(selectedChannel)) return;
+      setIsWatching(true);
+      setIsPlayerLoading(false);
+      setPlayerError(false);
+      setShowChannelNotice(false);
+      const provider = accountProviders[selectedChannel.provider];
+      const channelUrl = selectedChannel.providerUrl || provider?.fallbackUrl;
+      const isConnected = providerAccounts[selectedChannel.provider]?.status === PROVIDER_STATUS.CONNECTED;
+      if (isConnected) {
+        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name });
+      } else {
+        openProviderLogin({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name });
+      }
+      return;
+    }
     setIsWatching(true);
     setPlayerError(false);
     setShowChannelNotice(true);
@@ -1883,7 +1939,8 @@ function App() {
     const programChanged = previousProgram.row !== remote.selectedProgram.row || previousProgram.col !== remote.selectedProgram.col;
     previousProgramRef.current = remote.selectedProgram;
     setActiveChannelIndex(remote.selectedProgram.row);
-    if (programChanged && !isMobile && !['external', 'provider'].includes(channels[remote.selectedProgram.row]?.playbackType)) startViewing(remote.selectedProgram.row);
+    const selectedChannel = channels[remote.selectedProgram.row];
+    if (programChanged && !isMobile && selectedChannel?.playbackType !== 'external' && (selectedChannel?.playbackType !== 'provider' || isDesktopProviderChannel(selectedChannel))) startViewing(remote.selectedProgram.row);
   }, [remote.selectedProgram.row, remote.selectedProgram.col, isMobile, region?.regionId]);
 
   useEffect(() => {
@@ -1919,7 +1976,8 @@ function App() {
     closeDesktopProviderForChannel(channels[row]);
     setActiveChannelIndex(row);
     remote.selectProgram(row, col);
-    if (!isMobile && !['external', 'provider'].includes(channels[row]?.playbackType)) startViewing(row);
+    const selectedChannel = channels[row];
+    if (!isMobile && selectedChannel?.playbackType !== 'external' && (selectedChannel?.playbackType !== 'provider' || isDesktopProviderChannel(selectedChannel))) startViewing(row);
   };
 
   const selectChannel = (index) => {
@@ -1933,7 +1991,8 @@ function App() {
     closeDesktopProviderForChannel(channels[nextIndex]);
     setActiveChannelIndex(nextIndex);
     remote.selectProgram(nextIndex, 0);
-    if (!isMobile && !['external', 'provider'].includes(channels[nextIndex]?.playbackType)) startViewing(nextIndex);
+    const selectedChannel = channels[nextIndex];
+    if (!isMobile && selectedChannel?.playbackType !== 'external' && (selectedChannel?.playbackType !== 'provider' || isDesktopProviderChannel(selectedChannel))) startViewing(nextIndex);
   };
 
   useEffect(() => {
@@ -1945,7 +2004,7 @@ function App() {
         return;
       }
       if (!event?.providerId) return;
-      if (['ready', 'player'].includes(event.status)) {
+      if (event.status === 'player') {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,
@@ -1959,9 +2018,34 @@ function App() {
           return nextAccounts;
         });
       }
+      if (event.status === 'auth-required') {
+        setProviderAccounts((currentAccounts) => {
+          const nextAccounts = {
+            ...currentAccounts,
+            [event.providerId]: { status: PROVIDER_STATUS.DISCONNECTED },
+          };
+          writeStoredProviderAccounts(nextAccounts);
+          return nextAccounts;
+        });
+      }
+      if (event.status === 'closed' || event.reason === 'back') {
+        setIsWatching(false);
+        setIsPlayerLoading(false);
+        setShowChannelNotice(false);
+        setPlayerError(false);
+      }
       setProviderHandoff((current) => ({ ...(current || {}), ...event, surface: 'desktop' }));
     });
   }, [activeChannelIndex, isMobile, region?.regionId]);
+
+  useEffect(() => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.setProviderBounds) return;
+    const isActiveDesktopProvider = activeChannel?.playbackType === 'provider'
+      && providerHandoff?.surface === 'desktop'
+      && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
+    if (!isActiveDesktopProvider) desktop.setProviderBounds({ visible: false });
+  }, [activeChannel?.id, activeChannel?.playbackType, providerHandoff?.surface, providerHandoff?.status]);
 
   channelStepRef.current = stepChannel;
   volumeStepRef.current = changeVolume;
