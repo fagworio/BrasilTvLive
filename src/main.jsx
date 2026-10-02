@@ -117,6 +117,7 @@ const REDETV_OFFICIAL_LIVE_URL = 'https://www.redetv.uol.com.br/aovivo/';
 const REDETV_DAILYMOTION_PLAYER_URL = 'https://geo.dailymotion.com/player/xgrus.js';
 const REDETV_DAILYMOTION_VIDEO_ID = 'kYe5OYErhldJ75Azib2';
 const RECORDPLUS_LIVE_URL = 'https://www.recordplus.com/';
+const RECORDPLUS_NATIONAL_PLAYER_URL = 'https://www.recordplus.com/player/channel/Y2hhbm5lbCNyNy5jb20jc3A';
 const RECORDPLUS_LOGIN_URL = 'https://www.recordplus.com/login?redirectTo=%2F';
 const RECORD_NEWS_YOUTUBE_CHANNEL_ID = 'UCuiLR4p6wQ3xLEm15pEn1Xw';
 const RECORD_NEWS_YOUTUBE_EMBED_URL = `https://www.youtube.com/embed/live_stream?channel=${RECORD_NEWS_YOUTUBE_CHANNEL_ID}&autoplay=1&mute=1&playsinline=1&rel=0&controls=0&enablejsapi=1&disablekb=1&fs=0`;
@@ -227,8 +228,8 @@ const recordNationalChannel = {
   mark: 'record',
   playbackType: 'provider',
   provider: 'recordplus',
-  providerUrl: RECORDPLUS_LIVE_URL,
-  sourceUrl: RECORDPLUS_LIVE_URL,
+  providerUrl: RECORDPLUS_NATIONAL_PLAYER_URL,
+  sourceUrl: RECORDPLUS_NATIONAL_PLAYER_URL,
   authRequired: true,
   networkLabel: 'RECORD',
   programs: [['RECORD Nacional', 'Ao vivo no RecordPlus'], ['Jornalismo RECORD', 'A seguir'], ['Programação RECORD', 'Confira no RecordPlus']],

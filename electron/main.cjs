@@ -10,6 +10,10 @@ const rendererPreload = path.join(__dirname, 'preload.cjs');
 const providerPreload = path.join(__dirname, 'provider-preload.cjs');
 
 app.commandLine.appendSwitch('disable-gpu');
+// RecordPlus renders Google Identity Services in a cross-origin iframe. FedCM
+// can be unavailable in that embedded context, leaving the social button inert;
+// use the provider's regular OAuth popup flow instead.
+app.commandLine.appendSwitch('disable-features', 'FedCm');
 if (process.env.BRASILTVLIVE_REMOTE_DEBUG_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.BRASILTVLIVE_REMOTE_DEBUG_PORT);
 }
@@ -110,6 +114,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
           height: 720,
           minWidth: 360,
           minHeight: 520,
+          show: true,
           parent: mainWindow,
           modal: false,
           backgroundColor: '#ffffff',
@@ -122,6 +127,22 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
           },
         },
       };
+    });
+    providerView.webContents.on('did-create-window', (childWindow, details) => {
+      childWindow.setMenuBarVisibility(false);
+      childWindow.show();
+      childWindow.focus();
+      console.log(`[recordplus] OAuth window opened: ${details.url}`);
+      childWindow.webContents.on('did-navigate', (_event, navigatedUrl) => {
+        sendProviderState({ ...(providerState || {}), providerId, oauthUrl: navigatedUrl });
+      });
+      childWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+        if (!isMainFrame || errorCode === -3) return;
+        console.error(`[recordplus] OAuth window failed: ${errorCode} ${errorDescription} ${validatedUrl}`);
+      });
+    });
+    providerView.webContents.on('console-message', (_event, _level, message, line, sourceId) => {
+      console.log(`[recordplus] ${sourceId}:${line} ${message}`);
     });
     providerView.webContents.on('did-start-loading', () => {
       sendProviderState({ ...(providerState || {}), providerId, status: 'loading' });
