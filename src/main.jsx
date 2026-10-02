@@ -2004,8 +2004,8 @@ function App() {
       const channelUrl = selectedChannel.providerUrl || provider?.fallbackUrl;
       const isConnected = providerAccounts[selectedChannel.provider]?.status === PROVIDER_STATUS.CONNECTED;
       if (isConnected) {
-        setIsWatching(false);
-        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name, watch: false });
+        setIsWatching(true);
+        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name, watch: true });
       } else {
         setIsWatching(false);
         openProviderLogin({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name });
