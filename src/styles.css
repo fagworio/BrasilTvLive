@@ -80,16 +80,15 @@ button { font: inherit; }
 .program-cell.selected { border: 2px solid #3991ff; background: linear-gradient(135deg, #283747, #1e2937); box-shadow: 0 0 0 1px rgba(62,147,255,.14), inset 0 0 25px rgba(55,144,255,.08); }
 .program-cell.remote-focused { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .program-cell:focus-visible { outline: 3px solid #64b1ff; outline-offset: 2px; }
-.channel-mark { width: clamp(29px, 2.3vw, 43px); height: clamp(29px, 2.3vw, 43px); flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: white; font-size: clamp(9px, .6vw, 12px); font-weight: 700; letter-spacing: -1px; overflow: hidden; }
-.channel-mark.tv-brasil, .channel-mark.canal-gov { background: conic-gradient(from 145deg, #f7c517 0 26%, #2cad58 26% 58%, #0e65cd 58% 100%); clip-path: polygon(50% 0, 100% 48%, 50% 100%, 0 51%); border-radius: 0; }
-.channel-mark.tv-camara { background: #20aa68; font-size: 26px; } .channel-mark.tv-camara::after { content: 'L'; }
-.channel-mark.tv-senado { background: #253548; border: 2px solid #dce9fa; border-radius: 50%; font-size: 9px; letter-spacing: -1px; } .channel-mark.tv-senado span { font-size: 9px; line-height: .9; } .channel-mark.tv-senado em { font-size: 6px; font-style: normal; line-height: .8; }
-.channel-mark.tv-justica { background: linear-gradient(145deg, #aec7dc, #4e6b86); color: #172d45; font-size: 27px; border-radius: 50%; }
-.channel-mark.globo { background: radial-gradient(circle at 35% 30%, #fff 0 13%, transparent 14%), linear-gradient(145deg, #ef5a40 0 34%, #f5c620 34% 66%, #1ba86a 66%); border: 2px solid rgba(255,255,255,.72); color: #fff; font-size: 15px; }
-.channel-mark.sbt { background: linear-gradient(145deg, #ef3340, #b51f3d); border: 2px solid rgba(255,255,255,.72); color: #fff; font-size: 9px; letter-spacing: -.7px; }
-.channel-mark.band { background: linear-gradient(145deg, #f4b400, #e34b25 48%, #1a3f93 49% 100%); border: 2px solid rgba(255,255,255,.72); color: #fff; font-size: 8px; letter-spacing: -.8px; }
-.channel-mark.redetv { background: linear-gradient(145deg, #f4f6fb, #9da8bc); border: 2px solid rgba(255,255,255,.8); color: #192333; font-size: 8px; letter-spacing: -.5px; }
-.channel-mark.record, .channel-mark.record-news { background: linear-gradient(145deg, #e21d2f, #8d1020); border: 2px solid rgba(255,255,255,.8); color: #fff; font-size: 16px; letter-spacing: -1px; }
+.channel-mark { width: clamp(29px, 2.3vw, 43px); height: clamp(29px, 2.3vw, 43px); flex: 0 0 auto; display: grid; place-items: center; color: white; overflow: visible; }
+.channel-mark img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; user-select: none; pointer-events: none; }
+.channel-mark.tv-brasil img, .channel-mark.canal-gov img, .channel-mark.tv-camara img { width: 96%; height: 96%; }
+.channel-mark.sbt img, .channel-mark.globo img, .channel-mark.tv-integracao img { width: 94%; height: 94%; }
+.channel-mark.band img, .channel-mark.redetv img, .channel-mark.record img, .channel-mark.record-news img, .channel-mark.sbt-news img { width: 98%; height: 98%; }
+.channel-mark.tv-senado { background: #253548; border: 2px solid #dce9fa; border-radius: 50%; font-size: 9px; font-weight: 700; letter-spacing: -1px; overflow: hidden; }
+.channel-mark.tv-senado span { font-size: 9px; line-height: .9; }
+.channel-mark.tv-senado em { font-size: 6px; font-style: normal; line-height: .8; }
+.channel-mark.tv-justica { border-radius: 50%; color: #172d45; background: linear-gradient(145deg, #aec7dc, #4e6b86); font-size: 27px; font-weight: 700; overflow: hidden; }
 .time-marker { position: absolute; z-index: 10; top: -35px; bottom: -4px; left: 37.6%; width: 2px; background: #fb3649; pointer-events: none; }
 .time-marker span { position: absolute; z-index: 11; left: 50%; top: -1px; transform: translate(-50%, -100%); padding: 7px 10px; border-radius: 12px 12px 12px 0; background: #fb3649; color: #fff; font-size: 13px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.45); white-space: nowrap; }
 .hero-external-card { position: absolute; z-index: 3; top: 50%; right: clamp(30px, 7vw, 130px); display: grid; justify-items: start; gap: 8px; width: min(310px, 28vw); padding: 22px; border: 1px solid rgba(255,255,255,.14); border-radius: 16px; color: #f7f9fb; background: rgba(9,14,22,.72); box-shadow: 0 18px 50px rgba(0,0,0,.24); transform: translateY(-50%); backdrop-filter: blur(8px); }
