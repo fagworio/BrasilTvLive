@@ -133,6 +133,39 @@ function continuePendingProviderChannel(navigatedUrl) {
   }, 0);
 }
 
+function isProviderPlayerUrl(providerId, navigatedUrl, targetUrl = providerState?.channelUrl) {
+  try {
+    const parsedUrl = new URL(navigatedUrl);
+    if (providerId === 'recordplus') return parsedUrl.origin === 'https://www.recordplus.com' && parsedUrl.pathname.startsWith('/player/');
+    if (providerId === 'globoplay') {
+      const target = targetUrl ? new URL(targetUrl) : null;
+      return parsedUrl.origin === 'https://globoplay.globo.com'
+        && Boolean(target)
+        && parsedUrl.pathname === target.pathname
+        && parsedUrl.pathname.includes('/ao-vivo/');
+    }
+  } catch { /* provider navigations are expected to be absolute URLs */ }
+  return false;
+}
+
+function isProviderHomeUrl(providerId, navigatedUrl) {
+  try {
+    const parsedUrl = new URL(navigatedUrl);
+    if (providerId === 'recordplus') return parsedUrl.origin === 'https://www.recordplus.com' && ['/', '/home'].includes(parsedUrl.pathname);
+    if (providerId === 'globoplay') return parsedUrl.origin === 'https://globoplay.globo.com' && parsedUrl.pathname === '/';
+  } catch { /* provider navigations are expected to be absolute URLs */ }
+  return false;
+}
+
+function isProviderLoginUrl(providerId, navigatedUrl) {
+  try {
+    const parsedUrl = new URL(navigatedUrl);
+    if (providerId === 'recordplus') return parsedUrl.origin === 'https://www.recordplus.com' && parsedUrl.pathname.startsWith('/login');
+    return parsedUrl.hostname === 'login.globo.com';
+  } catch { /* provider navigations are expected to be absolute URLs */ }
+  return false;
+}
+
 function attachProviderView({ providerId, url, channelUrl, channelName }) {
   if (!mainWindow || !url) return { status: 'error', reason: 'missing-url' };
 
@@ -176,25 +209,25 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       childWindow.setMenuBarVisibility(false);
       childWindow.show();
       childWindow.focus();
-      console.log(`[recordplus] OAuth window opened: ${details.url}`);
+      console.log(`[${providerId}] OAuth window opened: ${details.url}`);
       childWindow.webContents.on('did-navigate', (_event, navigatedUrl) => {
         sendProviderState({ ...(providerState || {}), providerId, oauthUrl: navigatedUrl });
       });
       childWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
         if (!isMainFrame || errorCode === -3) return;
-        console.error(`[recordplus] OAuth window failed: ${errorCode} ${errorDescription} ${validatedUrl}`);
+        console.error(`[${providerId}] OAuth window failed: ${errorCode} ${errorDescription} ${validatedUrl}`);
       });
     });
     providerView.webContents.on('console-message', (_event, _level, message, line, sourceId) => {
-      console.log(`[recordplus] ${sourceId}:${line} ${message}`);
+      console.log(`[${providerId}] ${sourceId}:${line} ${message}`);
     });
     providerView.webContents.on('did-start-loading', () => {
       sendProviderState({ ...(providerState || {}), providerId, status: 'loading' });
     });
     providerView.webContents.on('did-stop-loading', () => {
       const currentUrl = providerView.webContents.getURL();
-      const isLogin = currentUrl.includes('recordplus.com/login');
-      const isPlayer = currentUrl.includes('/player/');
+      const isLogin = isProviderLoginUrl(providerId, currentUrl);
+      const isPlayer = isProviderPlayerUrl(providerId, currentUrl, providerState?.channelUrl);
       sendProviderState({
         ...(providerState || {}),
         providerId,
@@ -204,14 +237,9 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
     });
     providerView.webContents.on('did-finish-load', applyProviderVideoPresentation);
     const handleProviderNavigation = (_event, navigatedUrl) => {
-      const isPlayer = navigatedUrl.includes('/player/');
-      let isHome = false;
-      let isLogin = false;
-      try {
-        const pathname = new URL(navigatedUrl).pathname;
-        isHome = ['/', '/home'].includes(pathname);
-        isLogin = pathname.startsWith('/login');
-      } catch { /* provider navigations are expected to be absolute URLs */ }
+      const isPlayer = isProviderPlayerUrl(providerId, navigatedUrl, providerState?.channelUrl);
+      const isHome = isProviderHomeUrl(providerId, navigatedUrl);
+      const isLogin = isProviderLoginUrl(providerId, navigatedUrl);
       sendProviderState({
         ...(providerState || {}),
         providerId,
@@ -251,7 +279,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
   }
 
   applyProviderBounds({ visible: false });
-  providerState = { providerId, channelUrl, channelName, status: url.includes('/player/') ? 'player' : 'open' };
+  providerState = { providerId, channelUrl, channelName, status: isProviderPlayerUrl(providerId, url, channelUrl) ? 'player' : 'open' };
   providerView.webContents.loadURL(url);
   focusProviderView();
   sendProviderState(providerState);
