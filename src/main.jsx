@@ -146,6 +146,18 @@ const PROVIDER_STATUS = {
 
 const PROVIDER_ACCOUNTS_STORAGE_KEY = 'brasiltvlive-provider-accounts';
 
+function getRecordPlusLoginUrl(channelUrl) {
+  if (!channelUrl || !channelUrl.includes('/player/')) return RECORDPLUS_LOGIN_URL;
+  try {
+    const channelPath = `${new URL(channelUrl).pathname}${new URL(channelUrl).search}`;
+    const loginUrl = new URL(RECORDPLUS_LOGIN_URL);
+    loginUrl.searchParams.set('redirectTo', channelPath);
+    return loginUrl.toString();
+  } catch {
+    return RECORDPLUS_LOGIN_URL;
+  }
+}
+
 const globoRegionalCatalog = {
   'mg-bh': { label: 'Globo Minas' },
   'mg-uberlandia': { label: 'TV Integração' },
@@ -751,7 +763,7 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
             {providerHandoff.status === 'open'
-              ? isDesktopProvider ? 'Faça o login nesta superfície oficial. Depois volte ao app e abra o canal para carregar o live na mesma sessão.' : 'Depois de entrar e escolher o perfil, use “Abrir player no popup” para manter a mesma sessão.'
+              ? isDesktopProvider ? 'Conclua o login e escolha seu perfil. O RecordPlus retornará ao canal Record selecionado.' : 'Depois de entrar e escolher o perfil, o RecordPlus retornará ao canal Record selecionado.'
               : providerHandoff.status === 'loading'
                 ? 'Carregando a superfície oficial do RecordPlus…'
               : providerHandoff.status === 'ready'
@@ -834,7 +846,7 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
           {!isDesktopSurface && <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir login em nova aba</a>}
           {providerHandoff?.providerId === providerId && <small role="status" aria-live="polite">
             {providerHandoff.status === 'open'
-              ? isDesktopSurface ? 'A superfície oficial está aberta no painel direito. Use Esc/Voltar para retornar ao app.' : 'A janela de login está aberta. A sessão continua no RecordPlus.'
+              ? isDesktopSurface ? 'A superfície oficial do RecordPlus está aberta na área do player. Conclua o login para retornar ao canal Record selecionado.' : 'A janela de login está aberta. A sessão continua no RecordPlus.'
               : providerHandoff.status === 'loading'
                 ? 'Carregando a superfície oficial…'
               : providerHandoff.status === 'closed'
@@ -1682,6 +1694,7 @@ function App() {
   const channelNoticeTimerRef = useRef(null);
   const providerPopupTimerRef = useRef(null);
   const providerPopupRef = useRef(null);
+  const providerTargetRef = useRef(null);
   const channels = getChannelsForRegion(region?.regionId || regionOptions[0].regionId);
   const remote = useTvRemoteController({
     channels,
@@ -1736,17 +1749,19 @@ function App() {
 
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
+      providerTargetRef.current = { providerId, channelUrl, channelName };
       const nextHandoff = { providerId, channelUrl, channelName, status: 'open', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
-      desktop.openProviderSurface({ providerId, url: provider.fallbackUrl, channelUrl, channelName })
+      desktop.openProviderSurface({ providerId, url: getRecordPlusLoginUrl(channelUrl), channelUrl, channelName })
         .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
         .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
       return;
     }
 
     window.clearInterval(providerPopupTimerRef.current);
+    providerTargetRef.current = { providerId, channelUrl, channelName };
     const popup = window.open(
-      provider.fallbackUrl,
+      getRecordPlusLoginUrl(channelUrl),
       `brasiltvlive-${providerId}-login`,
       'popup=yes,width=520,height=760,resizable=yes,scrollbars=yes',
     );
@@ -1773,6 +1788,7 @@ function App() {
   const openProviderChannel = ({ providerId, channelUrl, channelName }) => {
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
+      providerTargetRef.current = { providerId, channelUrl, channelName };
       const nextHandoff = { providerId, channelUrl, channelName, status: 'player', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
       desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName })
@@ -1783,6 +1799,7 @@ function App() {
 
     const popup = providerPopupRef.current;
     if (popup && !popup.closed) {
+      providerTargetRef.current = { providerId, channelUrl, channelName };
       popup.location.href = channelUrl;
       popup.focus?.();
       setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
@@ -1796,6 +1813,7 @@ function App() {
       `brasiltvlive-${providerId}-player`,
       'popup=yes,width=1100,height=760,resizable=yes,scrollbars=yes',
     );
+    providerTargetRef.current = { providerId, channelUrl, channelName };
     setProviderHandoff({ providerId, channelUrl, channelName, status: playerWindow ? 'player' : 'blocked' });
     playerWindow?.focus?.();
   };
@@ -1804,6 +1822,7 @@ function App() {
     const desktop = getDesktopBridge();
     if (!desktop?.isDesktop || providerHandoff?.surface !== 'desktop') return;
     if (nextChannel?.playbackType === 'provider' && nextChannel.provider === providerHandoff.providerId) return;
+    providerTargetRef.current = null;
     desktop.closeProviderSurface?.();
     setProviderHandoff(null);
   };
@@ -2004,6 +2023,15 @@ function App() {
         return;
       }
       if (!event?.providerId) return;
+      const isCurrentProviderTarget = event.providerId === providerTargetRef.current?.providerId
+        && (!event.channelUrl || event.channelUrl === providerTargetRef.current?.channelUrl);
+      if (isCurrentProviderTarget && event.channelUrl?.includes('/player/') && ['auth-required', 'loading', 'player'].includes(event.status)) {
+        const requestedChannelIndex = channels.findIndex((channel) => channel.provider === event.providerId && channel.providerUrl === event.channelUrl);
+        if (requestedChannelIndex >= 0 && requestedChannelIndex !== activeChannelIndex) {
+          setActiveChannelIndex(requestedChannelIndex);
+          remote.selectProgram(requestedChannelIndex, 0);
+        }
+      }
       if (event.status === 'player') {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
@@ -2017,6 +2045,7 @@ function App() {
           writeStoredProviderAccounts(nextAccounts);
           return nextAccounts;
         });
+        if (isCurrentProviderTarget) setIsWatching(true);
       }
       if (event.status === 'auth-required') {
         setProviderAccounts((currentAccounts) => {
@@ -2036,7 +2065,7 @@ function App() {
       }
       setProviderHandoff((current) => ({ ...(current || {}), ...event, surface: 'desktop' }));
     });
-  }, [activeChannelIndex, isMobile, region?.regionId]);
+  }, [activeChannelIndex, channels, isMobile, region?.regionId]);
 
   useEffect(() => {
     const desktop = getDesktopBridge();
