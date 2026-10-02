@@ -742,6 +742,7 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
     && providerHandoff?.channelUrl === channelUrl
     && (!providerHandoff?.channelName || providerHandoff.channelName === channel.name);
   const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
+  const canOpenLogin = Boolean(onOpenProviderLogin || onOpenAccounts);
 
   useLayoutEffect(() => {
     const desktop = getDesktopBridge();
@@ -795,8 +796,12 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 ? `Sua sessão ${provider.label} precisa ser reconectada.`
                 : `Este canal exige uma conta ${provider.label}.`}</span>
           {usesExternalSurface || (isDesktopProvider && showDesktopActions) ? <div className="provider-handoff-actions">
-            {onOpenProviderLogin && <button type="button" onClick={(event) => {
+            {canOpenLogin && <button type="button" onClick={(event) => {
               event.stopPropagation();
+              if (!onOpenProviderLogin) {
+                onOpenAccounts?.();
+                return;
+              }
               if (isThisHandoff && ['ready', 'player'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: true });
                 return;
@@ -806,7 +811,7 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{isThisHandoff && ['open', 'loading', 'ready', 'player'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : isThisHandoff && ['open', 'loading', 'ready', 'player'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             {(!isDesktopProvider || !isConnected) && <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no {provider.label}</a>}
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
@@ -2103,6 +2108,15 @@ function App() {
     return () => window.removeEventListener('keydown', handleViewingBack);
   }, [isWatching]);
 
+  const focusProgram = (row, col) => {
+    const focusedChannel = channels[row];
+    if (focusedChannel?.id !== activeChannel?.id) {
+      closeDesktopProviderForChannel(focusedChannel);
+      setActiveChannelIndex(row);
+    }
+    remote.setFocusedProgram(row, col);
+  };
+
   const selectProgram = (row, col) => {
     closeDesktopProviderForChannel(channels[row]);
     setActiveChannelIndex(row);
@@ -2277,7 +2291,7 @@ function App() {
               focusedRow={remote.focusedRow}
               focusedCol={remote.focusedCol}
               selectedProgram={remote.selectedProgram}
-              onFocus={remote.setFocusedProgram}
+              onFocus={focusProgram}
               onSelect={selectProgram}
               programRefs={remote.programRefs}
             />
