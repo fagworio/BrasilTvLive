@@ -28,6 +28,7 @@ let providerView;
 let providerState = null;
 let lastProviderBounds = null;
 let providerLayer = 'foreground';
+let providerFullscreenTimer = null;
 
 function sendProviderState(nextState) {
   providerState = nextState;
@@ -42,6 +43,13 @@ function focusProviderView() {
   if (providerView && !providerView.webContents.isDestroyed()) providerView.webContents.focus();
 }
 
+function clearProviderFullscreenTimer() {
+  if (providerFullscreenTimer) {
+    clearTimeout(providerFullscreenTimer);
+    providerFullscreenTimer = null;
+  }
+}
+
 function applyProviderVideoPresentation() {
   if (!providerView || providerView.webContents.isDestroyed()) return;
   providerView.webContents.insertCSS(`
@@ -49,6 +57,39 @@ function applyProviderVideoPresentation() {
       object-fit: cover !important;
     }
   `).catch(() => {});
+}
+
+function requestGloboplayPlayerFullscreen(attempt = 0) {
+  if (!providerView || providerView.webContents.isDestroyed()) return;
+  if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
+
+  providerView.webContents.executeJavaScript(`(() => {
+    const player = document.querySelector('#wp3-player-1');
+    const fullscreenButton = player?.querySelector('[data-fullscreen]');
+    if (!player || !fullscreenButton) return { ready: false, fullscreen: false };
+
+    const isFullscreen = Boolean(document.fullscreenElement) || player.classList.contains('fullscreen');
+    if (!isFullscreen) fullscreenButton.click();
+
+    return {
+      ready: true,
+      fullscreen: Boolean(document.fullscreenElement) || player.classList.contains('fullscreen'),
+    };
+  })()`, true).then((result) => {
+    if (!providerView || providerView.webContents.isDestroyed()) return;
+    if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
+    if (result?.fullscreen || attempt >= 12) return;
+    providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(attempt + 1), 350);
+  }).catch(() => {
+    if (attempt >= 12) return;
+    providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(attempt + 1), 350);
+  });
+}
+
+function scheduleProviderPlayerFullscreen() {
+  clearProviderFullscreenTimer();
+  if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
+  providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(), 250);
 }
 
 function sendAppState(nextState) {
@@ -99,6 +140,7 @@ function setProviderLayer(layer = 'foreground') {
 }
 
 function removeProviderView(reason = 'closed') {
+  clearProviderFullscreenTimer();
   if (providerView) {
     mainWindow.contentView.removeChildView(providerView);
     providerView.webContents.close();
@@ -252,7 +294,10 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
         currentUrl,
       });
     });
-    providerView.webContents.on('did-finish-load', applyProviderVideoPresentation);
+    providerView.webContents.on('did-finish-load', () => {
+      applyProviderVideoPresentation();
+      scheduleProviderPlayerFullscreen();
+    });
     const handleProviderNavigation = (_event, navigatedUrl) => {
       const isPlayer = isProviderPlayerUrl(providerId, navigatedUrl, providerState?.channelUrl);
       const isHome = isProviderHomeUrl(providerId, navigatedUrl);
@@ -300,8 +345,10 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
   }
 
   applyProviderBounds({ visible: false });
+  clearProviderFullscreenTimer();
   providerState = { providerId, channelUrl, channelName, mode, status: mode === 'player' && isProviderPlayerUrl(providerId, url, channelUrl) ? 'player' : 'open' };
   providerView.webContents.loadURL(url);
+  if (providerId === 'globoplay' && mode === 'player') scheduleProviderPlayerFullscreen();
   focusProviderView();
   sendProviderState(providerState);
   return providerState;
