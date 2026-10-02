@@ -80,8 +80,8 @@ button { font: inherit; }
 .program-cell.selected { border: 2px solid #3991ff; background: linear-gradient(135deg, #283747, #1e2937); box-shadow: 0 0 0 1px rgba(62,147,255,.14), inset 0 0 25px rgba(55,144,255,.08); }
 .program-cell.remote-focused { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .program-cell:focus-visible { outline: 3px solid #64b1ff; outline-offset: 2px; }
-.channel-mark { width: clamp(29px, 2.3vw, 43px); height: clamp(29px, 2.3vw, 43px); flex: 0 0 auto; display: grid; place-items: center; color: white; overflow: visible; }
-.channel-mark img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: center; user-select: none; pointer-events: none; }
+.channel-mark { width: clamp(64px, 4.5vw, 84px); height: clamp(34px, 2.5vw, 44px); flex: 0 0 auto; display: grid; place-items: center; color: white; overflow: visible; }
+.channel-mark img { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; object-fit: contain; object-position: center; user-select: none; pointer-events: none; }
 .channel-mark.tv-brasil img, .channel-mark.canal-gov img, .channel-mark.tv-camara img { width: 96%; height: 96%; }
 .channel-mark.sbt img, .channel-mark.globo img, .channel-mark.tv-integracao img { width: 94%; height: 94%; }
 .channel-mark.band img, .channel-mark.redetv img, .channel-mark.record img, .channel-mark.record-news img, .channel-mark.sbt-news img { width: 98%; height: 98%; }
@@ -282,7 +282,7 @@ button { font: inherit; }
 .mobile-channel-row { display: flex; align-items: center; min-height: 50px; gap: 9px; border-bottom: 1px solid rgba(125,138,155,.12); cursor: pointer; scroll-margin-block: 12px 84px; }
   .mobile-channel-row.active { background: linear-gradient(90deg, rgba(42,233,133,.08), transparent 72%); }
   .mobile-channel-row:focus-visible { outline: 2px solid #63b2ff; outline-offset: -2px; }
-  .mobile-channel-row .channel-mark { width: 34px; height: 34px; font-size: 8px; }
+  .mobile-channel-row .channel-mark { width: 52px; height: 34px; font-size: 8px; }
   .mobile-channel-copy { min-width: 0; display: grid; gap: 3px; }
   .mobile-channel-copy strong { overflow: hidden; color: #e9edf2; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-channel-copy span { overflow: hidden; color: #8793a2; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
