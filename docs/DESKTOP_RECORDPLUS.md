@@ -7,7 +7,9 @@ npm install
 npm run desktop:dev
 ```
 
-No desktop, `Abrir login no app` carrega a página oficial em uma `WebContentsView` posicionada sobre a área de vídeo do hero. No guia ela não cobre a barra lateral nem a grade EPG; no modo assistir, ocupa somente a área do player em tela cheia. A interface, navegação, seleção de canais e zapping continuam pertencendo ao BrasilTvLive.
+No desktop, `Abrir login no app` carrega a página oficial em uma `WebContentsView` persistente. Depois da autenticação, o vídeo ocupa todo o hero como prévia atrás do texto e do gradiente do BrasilTvLive; ao assistir, a surface oficial sobe para frente e ocupa a janela inteira. A interface, navegação, seleção de canais e zapping continuam pertencendo ao BrasilTvLive.
+
+A composição usa `BaseWindow` com duas `WebContentsView`s: o app fica acima do RecordPlus na prévia, enquanto os controles nativos de volume, fullscreen e navegação do provedor permanecem disponíveis quando o player está em primeiro plano. O app só controla o mute global da surface para manter a prévia silenciosa; não simula volume em uma página cross-origin.
 
 A sessão usa a partição persistente `persist:recordplus`, portanto cookies, armazenamento e a sessão do provedor permanecem no Electron ao fechar e reabrir o aplicativo. A surface é ocultada durante a troca de canal e reutilizada, sem logout ou cópia de dados. O BrasilTvLive não lê nem copia credenciais, cookies ou tokens.
 

@@ -691,7 +691,7 @@ function EmbedSurface({ channel, className, isWatching, volume, isMuted, onPlayb
   return <SpallaSurface channel={channel} className={className} isWatching={isWatching} volume={volume} isMuted={isMuted} onPlaybackStarted={onPlaybackStarted} onPlaybackError={onPlaybackError} />;
 }
 
-function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
+function ProviderSurface({ channel, account, className, isWatching = false, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
   const surfaceRef = useRef(null);
   const provider = accountProviders[channel.provider];
   const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
@@ -734,7 +734,7 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
       window.removeEventListener('resize', syncBounds);
       desktop.setProviderBounds({ visible: false });
     };
-  }, [desktopSurfaceOpen, channel.id]);
+  }, [desktopSurfaceOpen, channel.id, isWatching]);
 
   if (!provider) return null;
 
@@ -1043,7 +1043,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
           <a href={channel.externalUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${externalProviderLabel} para ${channel.name}`}>Abrir no {externalProviderLabel}</a>
         </div>
       ) : isProvider ? (
-        <ProviderSurface channel={channel} account={providerAccounts?.[channel.provider]} className="hero-provider-surface" onOpenAccounts={onOpenAccounts} onOpenProviderLogin={onOpenProviderLogin} onOpenProviderChannel={onOpenProviderChannel} providerHandoff={providerHandoff} />
+        <ProviderSurface channel={channel} account={providerAccounts?.[channel.provider]} className="hero-provider-surface" isWatching={isWatching} onOpenAccounts={onOpenAccounts} onOpenProviderLogin={onOpenProviderLogin} onOpenProviderChannel={onOpenProviderChannel} providerHandoff={providerHandoff} />
       ) : isEmbed ? (
         <EmbedSurface
           channel={channel}
@@ -1864,6 +1864,15 @@ function App() {
     desktop.setProviderAudioMuted?.(!isWatching || isMuted);
   }, [activeChannel?.provider, isMuted, isWatching, providerHandoff?.status]);
 
+  useEffect(() => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.isDesktop || activeChannel?.provider !== 'recordplus' || providerHandoff?.surface !== 'desktop') return;
+    const isOpen = ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
+    if (!isOpen) return;
+    const shouldPreviewBehindApp = providerHandoff.status === 'player' && !isWatching;
+    desktop.setProviderLayer?.(shouldPreviewBehindApp ? 'background' : 'foreground');
+  }, [activeChannel?.provider, isWatching, providerHandoff?.status, providerHandoff?.surface]);
+
   const handleProviderDisconnect = (providerId) => {
     setProviderAccounts((currentAccounts) => {
       const nextAccounts = {
@@ -2151,7 +2160,7 @@ function App() {
       </div>
       {volumeNotice && <div className="volume-notice" role="status" aria-live="polite"><span aria-hidden="true">{volumeNotice.muted ? '🔇' : '🔊'}</span> {volumeNotice.label}</div>}
       {isMobile ? <MobileApp channels={channels} activeChannelIndex={activeChannelIndex} onSelectChannel={selectChannel} onChannelStep={stepChannel} onOpenRegion={openRegionDialog} onPlaybackReady={handlePlaybackReady} onPlaybackError={handlePlaybackError} providerAccounts={providerAccounts} onOpenAccounts={openRegionDialog} /> : (
-        <main className={`tv-shell ${isWatching ? 'watching' : ''} ${isWatching && isPlayerLoading ? 'watch-loading' : ''}`}>
+        <main className={`tv-shell ${isWatching ? 'watching' : ''} ${isWatching && isPlayerLoading ? 'watch-loading' : ''} ${activeChannel?.playbackType === 'provider' && providerHandoff?.surface === 'desktop' && providerHandoff?.status === 'player' && !isWatching ? 'provider-preview' : ''}`}>
           <Sidebar
             focusedNav={remote.focusArea === 'nav' ? remote.focusedNav : -1}
             selectedNav={remote.selectedNav}

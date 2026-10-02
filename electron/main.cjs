@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain } = require('electron');
+const { app, BaseWindow, WebContentsView, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
@@ -19,14 +19,16 @@ if (process.env.BRASILTVLIVE_REMOTE_DEBUG_PORT) {
 }
 
 let mainWindow;
+let appView;
 let viteProcess;
 let providerView;
 let providerState = null;
 let lastProviderBounds = null;
+let providerLayer = 'foreground';
 
 function sendProviderState(nextState) {
   providerState = nextState;
-  if (!mainWindow?.isDestroyed()) mainWindow.webContents.send('provider:state', nextState);
+  if (!appView?.webContents.isDestroyed()) appView.webContents.send('provider:state', nextState);
 }
 
 function applyProviderBounds(bounds) {
@@ -37,7 +39,7 @@ function applyProviderBounds(bounds) {
   if (!isVisible) {
     providerView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     lastProviderBounds = { visible: false };
-    mainWindow.webContents.focus();
+    appView.webContents.focus();
     return;
   }
 
@@ -47,7 +49,23 @@ function applyProviderBounds(bounds) {
   const height = Math.max(0, Math.min(Math.round(bounds?.height || 0), contentHeight - y));
   providerView.setBounds({ x, y, width, height });
   lastProviderBounds = { visible: width > 0 && height > 0, x, y, width, height };
-  if (width > 0 && height > 0) providerView.webContents.focus();
+  if (width > 0 && height > 0) {
+    if (providerLayer === 'foreground') providerView.webContents.focus();
+    else appView.webContents.focus();
+  }
+}
+
+function setProviderLayer(layer = 'foreground') {
+  if (!providerView || !mainWindow || mainWindow.isDestroyed()) return false;
+  providerLayer = layer === 'background' ? 'background' : 'foreground';
+  if (providerLayer === 'background') {
+    mainWindow.contentView.addChildView(providerView, 0);
+    appView.webContents.focus();
+  } else {
+    mainWindow.contentView.addChildView(providerView);
+    providerView.webContents.focus();
+  }
+  return true;
 }
 
 function removeProviderView(reason = 'closed') {
@@ -201,11 +219,11 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       }
       if (input.type === 'keyDown' && input.key === 'ArrowUp') {
         event.preventDefault();
-        mainWindow.webContents.send('provider:state', { type: 'channel-step', direction: -1 });
+        appView.webContents.send('provider:state', { type: 'channel-step', direction: -1 });
       }
       if (input.type === 'keyDown' && input.key === 'ArrowDown') {
         event.preventDefault();
-        mainWindow.webContents.send('provider:state', { type: 'channel-step', direction: 1 });
+        appView.webContents.send('provider:state', { type: 'channel-step', direction: 1 });
       }
     });
   }
@@ -262,13 +280,15 @@ async function createWindow() {
     }
   }
 
-  mainWindow = new BrowserWindow({
+  mainWindow = new BaseWindow({
+    title: 'BrasilTvLive — Ao vivo',
     width: 1440,
     height: 900,
     minWidth: 1024,
     minHeight: 640,
     autoHideMenuBar: true,
-    backgroundColor: '#080b10',
+    transparent: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: rendererPreload,
       contextIsolation: true,
@@ -277,12 +297,32 @@ async function createWindow() {
     },
   });
   mainWindow.setMenuBarVisibility(false);
+  appView = new WebContentsView({
+    webPreferences: {
+      preload: rendererPreload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  appView.setBackgroundColor('#00000000');
+  mainWindow.contentView.addChildView(appView);
+  const syncAppBounds = () => {
+    const [contentWidth, contentHeight] = mainWindow.getContentSize();
+    appView.setBounds({ x: 0, y: 0, width: contentWidth, height: contentHeight });
+  };
+  syncAppBounds();
 
   mainWindow.on('resize', () => {
+    syncAppBounds();
     if (lastProviderBounds?.visible) applyProviderBounds(lastProviderBounds);
   });
-  mainWindow.on('closed', () => { mainWindow = null; });
-  await mainWindow.loadURL(isDevelopment ? devServerUrl : `file://${path.join(projectRoot, 'dist', 'index.html')}`);
+  mainWindow.on('closed', () => {
+    appView?.webContents.close();
+    appView = null;
+    mainWindow = null;
+  });
+  await appView.webContents.loadURL(isDevelopment ? devServerUrl : `file://${path.join(projectRoot, 'dist', 'index.html')}`);
 }
 
 ipcMain.handle('provider:open', (_event, payload) => attachProviderView(payload));
@@ -293,6 +333,7 @@ ipcMain.handle('provider:set-bounds', (_event, bounds) => {
   applyProviderBounds(bounds);
   return lastProviderBounds;
 });
+ipcMain.handle('provider:set-layer', (_event, layer) => setProviderLayer(layer));
 ipcMain.handle('provider:set-audio-muted', (_event, muted) => {
   if (!providerView || providerView.webContents.isDestroyed()) return false;
   providerView.webContents.setAudioMuted(Boolean(muted));
@@ -313,5 +354,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (BaseWindow.getAllWindows().length === 0) createWindow();
 });
