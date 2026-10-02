@@ -285,7 +285,7 @@ const recordNewsChannel = {
 const sbtNewsChannel = {
   id: 'sbt-news',
   name: 'SBT News',
-  mark: 'sbt',
+  mark: 'sbt-news',
   playbackType: 'hls',
   streamUrl: SBT_NEWS_LIVE_URL,
   sourceUrl: 'https://sbtnews.sbt.com.br/',
@@ -377,7 +377,7 @@ function getChannelsForRegion(regionId) {
   const regionalGlobo = {
     id: region.regionId === 'mg-bh' ? 'globo-minas' : `globo-${region.regionId}`,
     name: globoRegionalCatalog[region.regionId]?.label || 'Globo regional',
-    mark: 'globo',
+    mark: region.regionId === 'mg-uberlandia' ? 'tv-integracao' : 'globo',
     playbackType: 'provider',
     provider: 'globoplay',
     providerUrl: GLOBO_LIVE_URL,
@@ -957,10 +957,33 @@ function Brand() {
   );
 }
 
+const channelLogoSources = {
+  'tv-brasil': '/channel-logos/tv-brasil.svg',
+  'canal-gov': '/channel-logos/canal-gov.svg',
+  'tv-camara': '/channel-logos/tv-camara.svg',
+  'sbt': '/channel-logos/sbt.svg',
+  'sbt-news': '/channel-logos/sbt-news.svg',
+  'record': '/channel-logos/record.svg',
+  'record-news': '/channel-logos/record-news.svg',
+  'band': '/channel-logos/band.svg',
+  'redetv': '/channel-logos/redetv.svg',
+  'globo': '/channel-logos/globo.svg',
+  'tv-integracao': '/channel-logos/tv-integracao.svg',
+};
+
 function ChannelMark({ variant }) {
+  const logoSrc = channelLogoSources[variant];
+  if (logoSrc) {
+    return (
+      <span className={`channel-mark ${variant}`} aria-hidden="true">
+        <img src={logoSrc} alt="" draggable="false" />
+      </span>
+    );
+  }
+
   return (
     <span className={`channel-mark ${variant}`} aria-hidden="true">
-      {variant === 'tv-senado' ? <><span>tv</span><em>senado</em></> : variant === 'tv-justica' ? 'O' : variant === 'globo' ? 'G' : variant === 'sbt' ? 'SBT' : variant === 'band' ? 'BAND' : variant === 'redetv' ? 'RTV' : variant === 'record' || variant === 'record-news' ? 'R' : ''}
+      {variant === 'tv-senado' ? <><span>tv</span><em>senado</em></> : variant === 'tv-justica' ? 'O' : ''}
     </span>
   );
 }
