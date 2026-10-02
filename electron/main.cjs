@@ -10,6 +10,9 @@ const rendererPreload = path.join(__dirname, 'preload.cjs');
 const providerPreload = path.join(__dirname, 'provider-preload.cjs');
 
 app.commandLine.appendSwitch('disable-gpu');
+if (process.env.BRASILTVLIVE_REMOTE_DEBUG_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.BRASILTVLIVE_REMOTE_DEBUG_PORT);
+}
 
 let mainWindow;
 let viteProcess;
@@ -53,9 +56,26 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
     });
     mainWindow.contentView.addChildView(providerView);
     providerView.setBounds(providerBounds());
-    providerView.webContents.setWindowOpenHandler(({ url: childUrl }) => {
-      providerView.webContents.loadURL(childUrl);
-      return { action: 'deny' };
+    providerView.webContents.setWindowOpenHandler(() => {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 480,
+          height: 720,
+          minWidth: 360,
+          minHeight: 520,
+          parent: mainWindow,
+          modal: false,
+          backgroundColor: '#ffffff',
+          webPreferences: {
+            partition: `persist:${providerId}`,
+            preload: providerPreload,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        },
+      };
     });
     providerView.webContents.on('did-start-loading', () => {
       sendProviderState({ ...(providerState || {}), providerId, status: 'loading' });
@@ -74,6 +94,13 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
     });
     providerView.webContents.on('did-redirect-navigation', (_event, navigatedUrl) => {
       sendProviderState({ ...(providerState || {}), providerId, currentUrl: navigatedUrl });
+    });
+    providerView.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3) return;
+      sendProviderState({ ...(providerState || {}), providerId, status: 'error', errorCode, errorDescription, currentUrl: validatedUrl });
+    });
+    providerView.webContents.on('render-process-gone', (_event, details) => {
+      sendProviderState({ ...(providerState || {}), providerId, status: 'error', reason: `render-process-gone:${details.reason}` });
     });
     providerView.webContents.on('before-input-event', (event, input) => {
       const isBack = input.type === 'keyDown' && ['Escape', 'Backspace', 'BrowserBack', 'GoBack', 'Back'].includes(input.key);
@@ -150,6 +177,7 @@ async function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 640,
+    autoHideMenuBar: true,
     backgroundColor: '#080b10',
     webPreferences: {
       preload: rendererPreload,
@@ -158,6 +186,7 @@ async function createWindow() {
       sandbox: true,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   mainWindow.on('resize', () => providerView?.setBounds(providerBounds()));
   mainWindow.on('closed', () => { mainWindow = null; });

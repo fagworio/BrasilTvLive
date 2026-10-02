@@ -1763,6 +1763,14 @@ function App() {
     playerWindow?.focus?.();
   };
 
+  const closeDesktopProviderForChannel = (nextChannel) => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.isDesktop || providerHandoff?.surface !== 'desktop') return;
+    if (nextChannel?.playbackType === 'provider' && nextChannel.provider === providerHandoff.providerId) return;
+    desktop.closeProviderSurface?.();
+    setProviderHandoff(null);
+  };
+
   const handleProviderDisconnect = (providerId) => {
     setProviderAccounts((currentAccounts) => {
       const nextAccounts = {
@@ -1905,18 +1913,21 @@ function App() {
   }, [isWatching]);
 
   const selectProgram = (row, col) => {
+    closeDesktopProviderForChannel(channels[row]);
     setActiveChannelIndex(row);
     remote.selectProgram(row, col);
     if (!isMobile && !['external', 'provider'].includes(channels[row]?.playbackType)) startViewing(row);
   };
 
   const selectChannel = (index) => {
+    closeDesktopProviderForChannel(channels[index]);
     setActiveChannelIndex(index);
     remote.selectProgram(index, 0);
   };
 
   const stepChannel = (direction) => {
     const nextIndex = (activeChannelIndex + direction + channels.length) % channels.length;
+    closeDesktopProviderForChannel(channels[nextIndex]);
     setActiveChannelIndex(nextIndex);
     remote.selectProgram(nextIndex, 0);
     if (!isMobile && !['external', 'provider'].includes(channels[nextIndex]?.playbackType)) startViewing(nextIndex);

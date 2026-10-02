@@ -11,4 +11,4 @@ No desktop, `Abrir login no app` carrega a página oficial no painel direito. A 
 
 Depois do login, volte ao app com `Esc` e abra novamente o canal para carregar a URL oficial do live na mesma sessão. `Esc`/Back fecha a surface; `ArrowUp` e `ArrowDown` retornam o zapping para a lista do BrasilTvLive.
 
-No navegador comum, o comportamento permanece o fallback por popup/aba, porque o RecordPlus bloqueia o carregamento em iframe. Globo continua na etapa seguinte e não é habilitado por este slice.
+No navegador comum, o comportamento permanece o fallback por popup/aba, porque o RecordPlus bloqueia o carregamento em iframe. O botão social do Google abre a janela OAuth oficial do provedor dentro do desktop, compartilhando a partição persistente, sem alterar User-Agent ou copiar credenciais. Globo continua na etapa seguinte e não é habilitado por este slice.
