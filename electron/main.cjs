@@ -28,7 +28,19 @@ let providerLayer = 'foreground';
 
 function sendProviderState(nextState) {
   providerState = nextState;
-  if (!appView?.webContents.isDestroyed()) appView.webContents.send('provider:state', nextState);
+  if (appView && !appView.webContents.isDestroyed()) appView.webContents.send('provider:state', nextState);
+}
+
+function focusAppView() {
+  if (appView && !appView.webContents.isDestroyed()) appView.webContents.focus();
+}
+
+function focusProviderView() {
+  if (providerView && !providerView.webContents.isDestroyed()) providerView.webContents.focus();
+}
+
+function sendAppState(nextState) {
+  if (appView && !appView.webContents.isDestroyed()) appView.webContents.send('provider:state', nextState);
 }
 
 function applyProviderBounds(bounds) {
@@ -39,7 +51,7 @@ function applyProviderBounds(bounds) {
   if (!isVisible) {
     providerView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     lastProviderBounds = { visible: false };
-    appView.webContents.focus();
+    focusAppView();
     return;
   }
 
@@ -50,8 +62,8 @@ function applyProviderBounds(bounds) {
   providerView.setBounds({ x, y, width, height });
   lastProviderBounds = { visible: width > 0 && height > 0, x, y, width, height };
   if (width > 0 && height > 0) {
-    if (providerLayer === 'foreground') providerView.webContents.focus();
-    else appView.webContents.focus();
+    if (providerLayer === 'foreground') focusProviderView();
+    else focusAppView();
   }
 }
 
@@ -60,10 +72,10 @@ function setProviderLayer(layer = 'foreground') {
   providerLayer = layer === 'background' ? 'background' : 'foreground';
   if (providerLayer === 'background') {
     mainWindow.contentView.addChildView(providerView, 0);
-    appView.webContents.focus();
+    focusAppView();
   } else {
     mainWindow.contentView.addChildView(providerView);
-    providerView.webContents.focus();
+    focusProviderView();
   }
   return true;
 }
@@ -82,12 +94,12 @@ function hideProviderView(reason = 'hidden') {
   if (!providerView) return providerState;
   if (reason === 'back') {
     sendProviderState({ ...(providerState || {}), status: 'player', reason });
-    mainWindow?.webContents.focus();
+    focusAppView();
     return providerState;
   }
   applyProviderBounds({ visible: false });
   sendProviderState({ ...(providerState || {}), status: 'hidden', reason });
-  mainWindow?.webContents.focus();
+  focusAppView();
   return providerState;
 }
 
@@ -219,11 +231,11 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       }
       if (input.type === 'keyDown' && input.key === 'ArrowUp') {
         event.preventDefault();
-        appView.webContents.send('provider:state', { type: 'channel-step', direction: -1 });
+        sendAppState({ type: 'channel-step', direction: -1 });
       }
       if (input.type === 'keyDown' && input.key === 'ArrowDown') {
         event.preventDefault();
-        appView.webContents.send('provider:state', { type: 'channel-step', direction: 1 });
+        sendAppState({ type: 'channel-step', direction: 1 });
       }
     });
   }
@@ -231,7 +243,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
   applyProviderBounds({ visible: false });
   providerState = { providerId, channelUrl, channelName, status: url.includes('/player/') ? 'player' : 'open' };
   providerView.webContents.loadURL(url);
-  providerView.webContents.focus();
+  focusProviderView();
   sendProviderState(providerState);
   return providerState;
 }
