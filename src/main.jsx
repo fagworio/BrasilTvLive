@@ -781,6 +781,14 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
     return <div ref={surfaceRef} className={`provider-surface ${className || ''}`} aria-label={`${channel.name} — player oficial aberto`} />;
   }
 
+  const isDesktopLoginPreview = isDesktopProvider && !isConnected && !isWatching;
+  if (isDesktopLoginPreview) {
+    // Navigation mode keeps the normal BrasilTvLive hero visible. The actual
+    // provider login is opened only after Enter/select, when App switches to
+    // the fullscreen provider surface.
+    return <div ref={surfaceRef} className={`provider-surface ${className || ''}`} aria-hidden="true" />;
+  }
+
   if (!isConnected || usesExternalSurface || isDesktopProvider) {
     const showDesktopActions = !isDesktopProvider || !isConnected || desktopSurfaceOpen;
     return (
@@ -1038,6 +1046,12 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
   const isExternal = channel.playbackType === 'external';
   const isProvider = channel.playbackType === 'provider';
   const isEmbed = channel.playbackType === 'embed';
+  const providerAccount = isProvider ? providerAccounts?.[channel.provider] : null;
+  const providerNeedsLogin = isProvider
+    && providerAccount?.status !== PROVIDER_STATUS.CONNECTED
+    && !isWatching
+    && !['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff?.status);
+  const providerLabel = accountProviders[channel.provider]?.label || 'provedor';
   const externalProviderLabel = channel.externalProviderLabel || 'site oficial';
   const externalNotice = channel.authRequired
     ? `Transmissão oficial disponível no ${externalProviderLabel}. Cadastro ou login pode ser solicitado.`
@@ -1141,6 +1155,12 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
         <h1>{programName}</h1>
         <div className="program-meta"><span>{programTime}</span><i /> <span>Hoje, 15 de ago.</span></div>
         <p className="program-description">As principais notícias do Brasil e do mundo, com análises e reportagens especiais sobre política, economia, cultura e sociedade.</p>
+        {providerNeedsLogin && <div className="provider-login-prompt" role="status">
+          <span className="provider-login-prompt-kicker">Acesso necessário</span>
+          <strong>Faça login para assistir</strong>
+          <span>Conecte sua conta {providerLabel} para abrir {channel.name} ao vivo.</span>
+          {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId: channel.provider, channelUrl: channel.providerUrl, channelName: channel.name })}>Entrar para assistir</button>}
+        </div>}
         {channel.regionalUnavailable && <p className="regional-channel-note" role="status">{channel.regionalLabel} sem transmissão oficial regional disponível. Reproduzindo o sinal nacional da {channel.networkLabel || 'emissora'}.</p>}
       </div>
       <div className="hero-fade" />
