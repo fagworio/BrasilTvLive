@@ -402,6 +402,10 @@ function resolveRegionFromCoordinates(latitude, longitude) {
 
 const MOBILE_QUERY = '(max-width: 56rem), (max-height: 40rem) and (pointer: coarse) and (hover: none)';
 
+function getDesktopBridge() {
+  return typeof window !== 'undefined' ? window.brasilTvLiveDesktop : undefined;
+}
+
 function useStreamSource(videoRef, streamUrl, onStreamError, onStreamPlaying) {
   const errorRef = useRef(onStreamError);
   const playingRef = useRef(onStreamPlaying);
@@ -679,45 +683,53 @@ function ProviderSurface({ channel, account, className, onOpenAccounts, onOpenPr
   const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
   const isConnected = status === PROVIDER_STATUS.CONNECTED;
   const needsReconnect = status === PROVIDER_STATUS.EXPIRED || status === PROVIDER_STATUS.ERROR;
-  const usesExternalSurface = channel.provider === 'recordplus';
+  const isDesktopProvider = channel.provider === 'recordplus' && Boolean(getDesktopBridge()?.isDesktop);
+  const usesExternalSurface = channel.provider === 'recordplus' && !isDesktopProvider;
   const channelUrl = channel.providerUrl || provider?.fallbackUrl;
   const isThisHandoff = providerHandoff?.providerId === channel.provider
     && providerHandoff?.channelUrl === channelUrl;
+  const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'player'].includes(providerHandoff.status);
 
   if (!provider) return null;
 
-  if (!isConnected || usesExternalSurface) {
+  if (!isConnected || usesExternalSurface || isDesktopProvider) {
     return (
       <div className={`provider-surface ${className || ''}`}>
         <div className="provider-surface-card">
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
-          <span>{usesExternalSurface
-            ? `O player oficial do ${provider.label} abre fora do BrasilTvLive. Use a sessão já autenticada no navegador.`
-            : needsReconnect
-              ? `Sua sessão ${provider.label} precisa ser reconectada.`
-              : `Este canal exige uma conta ${provider.label}.`}</span>
-          {usesExternalSurface ? <div className="provider-handoff-actions">
+          <span>{isDesktopProvider
+            ? (desktopSurfaceOpen ? `A superfície oficial do ${provider.label} está aberta dentro do BrasilTvLive.` : isConnected ? `A sessão ${provider.label} está disponível neste desktop.` : `Conecte sua conta ${provider.label} dentro do aplicativo para abrir o live.`)
+            : usesExternalSurface
+              ? `O player oficial do ${provider.label} abre fora do BrasilTvLive. Use a sessão já autenticada no navegador.`
+              : needsReconnect
+                ? `Sua sessão ${provider.label} precisa ser reconectada.`
+                : `Este canal exige uma conta ${provider.label}.`}</span>
+          {usesExternalSurface || isDesktopProvider ? <div className="provider-handoff-actions">
             {onOpenProviderLogin && <button type="button" onClick={(event) => {
               event.stopPropagation();
-              if (isThisHandoff && providerHandoff.status === 'open') {
+              if (isThisHandoff && ['open', 'loading'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name });
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{isThisHandoff && providerHandoff.status === 'open' ? 'Abrir player no popup' : 'Abrir login no PC'}</button>}
+            }}>{isThisHandoff && ['open', 'loading'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no RecordPlus</a>
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
             {providerHandoff.status === 'open'
-              ? 'Depois de entrar e escolher o perfil, use “Abrir player no popup” para manter a mesma sessão.'
+              ? isDesktopProvider ? 'Faça o login nesta superfície oficial. Depois volte ao app e abra o canal para carregar o live na mesma sessão.' : 'Depois de entrar e escolher o perfil, use “Abrir player no popup” para manter a mesma sessão.'
+              : providerHandoff.status === 'loading'
+                ? 'Carregando a superfície oficial do RecordPlus…'
               : providerHandoff.status === 'closed'
-                ? 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
+                ? isDesktopProvider ? 'A superfície foi fechada. Abra o canal novamente para continuar com a sessão persistente.' : 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
                 : providerHandoff.status === 'player'
-                  ? 'O player foi aberto na mesma janela do RecordPlus.'
+                  ? isDesktopProvider ? 'O player oficial está aberto dentro do BrasilTvLive.' : 'O player foi aberto na mesma janela do RecordPlus.'
                   : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
           </span>}
-          <small>{usesExternalSurface
+          <small>{isDesktopProvider
+            ? 'A sessão fica na partição persistente do RecordPlus. O BrasilTvLive não recebe credenciais, cookies ou tokens.'
+            : usesExternalSurface
             ? 'O login, os cookies e a reprodução permanecem na superfície oficial. O BrasilTvLive não recebe essas credenciais.'
             : 'O login acontece na superfície oficial do provedor. O BrasilTvLive não armazena suas credenciais.'}</small>
         </div>
@@ -742,6 +754,7 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
   const providerUrl = providerId === 'recordplus' ? RECORDPLUS_LOGIN_URL : GLOBO_LIVE_URL;
   const [surfaceState, setSurfaceState] = useState('loading');
   const isRecordPlusExternal = providerId === 'recordplus';
+  const isDesktopSurface = Boolean(getDesktopBridge()?.isDesktop);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -776,17 +789,19 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
       <div className="provider-login-frame-wrap">
         {isRecordPlusExternal ? <div className="provider-login-handoff">
           <ChannelMark variant={provider.mark} />
-          <strong>Login do RecordPlus no navegador</strong>
-          <span>O login será aberto em uma janela própria. Depois de concluir, volte para o BrasilTvLive e abra o canal oficial.</span>
+          <strong>{isDesktopSurface ? 'Login do RecordPlus dentro do app' : 'Login do RecordPlus no navegador'}</strong>
+          <span>{isDesktopSurface ? 'A página oficial será carregada dentro do BrasilTvLive. A sessão fica persistente no desktop e não é copiada para o app.' : 'O login será aberto em uma janela própria. Depois de concluir, volte para o BrasilTvLive e abra o canal oficial.'}</span>
           {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId })}>
-            {providerHandoff?.providerId === providerId && providerHandoff.status === 'open' ? 'Login aberto' : 'Abrir login em janela'}
+            {providerHandoff?.providerId === providerId && ['open', 'loading'].includes(providerHandoff.status) ? (isDesktopSurface ? 'Login aberto no app' : 'Login aberto') : (isDesktopSurface ? 'Abrir login no app' : 'Abrir login em janela')}
           </button>}
-          <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir login em nova aba</a>
+          {!isDesktopSurface && <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir login em nova aba</a>}
           {providerHandoff?.providerId === providerId && <small role="status" aria-live="polite">
             {providerHandoff.status === 'open'
-              ? 'A janela de login está aberta. A sessão continua no RecordPlus.'
+              ? isDesktopSurface ? 'A superfície oficial está aberta no painel direito. Use Esc/Voltar para retornar ao app.' : 'A janela de login está aberta. A sessão continua no RecordPlus.'
+              : providerHandoff.status === 'loading'
+                ? 'Carregando a superfície oficial…'
               : providerHandoff.status === 'closed'
-                ? 'A janela foi fechada. O BrasilTvLive não consegue verificar o login externo.'
+                ? isDesktopSurface ? 'A superfície foi fechada. O BrasilTvLive mantém a sessão persistente para o próximo acesso.' : 'A janela foi fechada. O BrasilTvLive não consegue verificar o login externo.'
                 : 'O popup foi bloqueado; use a nova aba para continuar.'}
           </small>}
         </div> : surfaceState === 'blocked' ? <div className="provider-login-blocked" role="alert">
@@ -807,7 +822,7 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
       </div>
       <p className="provider-login-status" role="status" aria-live="polite">
         {isRecordPlusExternal
-          ? 'A sessão do RecordPlus permanece no navegador; o BrasilTvLive não recebe cookies ou credenciais.'
+          ? isDesktopSurface ? 'A sessão fica em persist:recordplus, gerenciada pelo Electron. O BrasilTvLive não recebe cookies ou credenciais.' : 'A sessão do RecordPlus permanece no navegador; o BrasilTvLive não recebe cookies ou credenciais.'
           : surfaceState === 'blocked'
           ? 'O provedor não permitiu carregar a superfície dentro do BrasilTvLive.'
           : surfaceState === 'loaded'
@@ -1682,6 +1697,16 @@ function App() {
     const provider = accountProviders[providerId];
     if (!provider?.fallbackUrl) return;
 
+    const desktop = getDesktopBridge();
+    if (desktop?.isDesktop) {
+      const nextHandoff = { providerId, channelUrl, channelName, status: 'open', surface: 'desktop' };
+      setProviderHandoff(nextHandoff);
+      desktop.openProviderSurface({ providerId, url: provider.fallbackUrl, channelUrl, channelName })
+        .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
+        .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
+      return;
+    }
+
     window.clearInterval(providerPopupTimerRef.current);
     const popup = window.open(
       provider.fallbackUrl,
@@ -1709,6 +1734,16 @@ function App() {
   };
 
   const openProviderChannel = ({ providerId, channelUrl, channelName }) => {
+    const desktop = getDesktopBridge();
+    if (desktop?.isDesktop) {
+      const nextHandoff = { providerId, channelUrl, channelName, status: 'player', surface: 'desktop' };
+      setProviderHandoff(nextHandoff);
+      desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName })
+        .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
+        .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
+      return;
+    }
+
     const popup = providerPopupRef.current;
     if (popup && !popup.closed) {
       popup.location.href = channelUrl;
@@ -1886,6 +1921,19 @@ function App() {
     remote.selectProgram(nextIndex, 0);
     if (!isMobile && !['external', 'provider'].includes(channels[nextIndex]?.playbackType)) startViewing(nextIndex);
   };
+
+  useEffect(() => {
+    const desktop = getDesktopBridge();
+    if (!desktop?.onProviderState) return undefined;
+    return desktop.onProviderState((event) => {
+      if (event?.type === 'channel-step') {
+        stepChannel(event.direction);
+        return;
+      }
+      if (!event?.providerId) return;
+      setProviderHandoff((current) => ({ ...(current || {}), ...event, surface: 'desktop' }));
+    });
+  }, [activeChannelIndex, isMobile, region?.regionId]);
 
   channelStepRef.current = stepChannel;
   volumeStepRef.current = changeVolume;
