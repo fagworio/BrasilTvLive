@@ -100,10 +100,10 @@ const baseChannels = [
 ];
 
 const regionOptions = [
-  { regionId: 'mg-bh', country: 'BR', state: 'MG', city: 'Belo Horizonte', label: 'Belo Horizonte - MG', channelName: 'Globo Minas', lat: -19.92, lon: -43.94 },
-  { regionId: 'mg-uberlandia', country: 'BR', state: 'MG', city: 'Uberlândia', label: 'Uberlândia - MG', channelName: 'TV Integração', lat: -18.91, lon: -48.28 },
-  { regionId: 'sp-capital', country: 'BR', state: 'SP', city: 'São Paulo', label: 'São Paulo - SP', channelName: 'Globo SP', lat: -23.55, lon: -46.63 },
-  { regionId: 'rj-capital', country: 'BR', state: 'RJ', city: 'Rio de Janeiro', label: 'Rio de Janeiro - RJ', channelName: 'Globo Rio', lat: -22.91, lon: -43.17 },
+  { regionId: 'mg-bh', country: 'BR', state: 'MG', city: 'Belo Horizonte', label: 'Belo Horizonte - MG', lat: -19.92, lon: -43.94 },
+  { regionId: 'mg-uberlandia', country: 'BR', state: 'MG', city: 'Uberlândia', label: 'Uberlândia - MG', lat: -18.91, lon: -48.28 },
+  { regionId: 'sp-capital', country: 'BR', state: 'SP', city: 'São Paulo', label: 'São Paulo - SP', lat: -23.55, lon: -46.63 },
+  { regionId: 'rj-capital', country: 'BR', state: 'RJ', city: 'Rio de Janeiro', label: 'Rio de Janeiro - RJ', lat: -22.91, lon: -43.17 },
 ];
 
 const GLOBO_LIVE_URL = 'https://globoplay.globo.com/tv-globo/ao-vivo/7832875/';
@@ -116,6 +116,46 @@ const BAND_NATIONAL_EMBED_URL = `https://beyond.spalla.io/player/?autoplay=1&liv
 const REDETV_OFFICIAL_LIVE_URL = 'https://www.redetv.uol.com.br/aovivo/';
 const REDETV_DAILYMOTION_PLAYER_URL = 'https://geo.dailymotion.com/player/xgrus.js';
 const REDETV_DAILYMOTION_VIDEO_ID = 'kYe5OYErhldJ75Azib2';
+const RECORDPLUS_LIVE_URL = 'https://www.recordplus.com/';
+const RECORD_NEWS_YOUTUBE_CHANNEL_ID = 'UCuiLR4p6wQ3xLEm15pEn1Xw';
+const RECORD_NEWS_YOUTUBE_EMBED_URL = `https://www.youtube.com/embed/live_stream?channel=${RECORD_NEWS_YOUTUBE_CHANNEL_ID}&autoplay=1&mute=1&playsinline=1&rel=0&controls=0&enablejsapi=1&disablekb=1&fs=0`;
+
+const accountProviders = {
+  globoplay: {
+    id: 'globoplay',
+    label: 'Globo / Globoplay',
+    mark: 'globo',
+  },
+  recordplus: {
+    id: 'recordplus',
+    label: 'RECORD / RecordPlus',
+    mark: 'record',
+  },
+};
+
+const PROVIDER_STATUS = {
+  DISCONNECTED: 'disconnected',
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  EXPIRED: 'expired',
+  ERROR: 'error',
+};
+
+const PROVIDER_ACCOUNTS_STORAGE_KEY = 'brasiltvlive-provider-accounts';
+
+const globoRegionalCatalog = {
+  'mg-bh': { label: 'Globo Minas' },
+  'mg-uberlandia': { label: 'TV Integração' },
+  'sp-capital': { label: 'Globo SP' },
+  'rj-capital': { label: 'Globo Rio' },
+};
+
+const recordRegionalCatalog = {
+  'mg-bh': { label: 'RECORD Minas', liveAvailability: 'confirmed' },
+  'mg-uberlandia': { label: 'TV Paranaíba RECORD', liveAvailability: 'unverified' },
+  'sp-capital': { label: 'RECORD São Paulo', liveAvailability: 'confirmed' },
+  'rj-capital': { label: 'RECORD Rio', liveAvailability: 'confirmed' },
+};
 
 const sbtRegionalCatalog = {
   'mg-bh': { label: 'SBT Regional · Belo Horizonte - MG', streamUrl: null, embedUrl: null },
@@ -164,6 +204,31 @@ const redeTvNationalChannel = {
   dailymotionVideoId: REDETV_DAILYMOTION_VIDEO_ID,
   sourceUrl: REDETV_OFFICIAL_LIVE_URL,
   programs: [['RedeTV! ao vivo', 'Ao vivo'], ['Brasil do Povo', 'A seguir'], ['TV Fama', 'Confira na RedeTV!']],
+};
+
+const recordNationalChannel = {
+  id: 'record',
+  name: 'RECORD Nacional',
+  mark: 'record',
+  playbackType: 'external',
+  externalProviderLabel: 'RecordPlus',
+  externalUrl: RECORDPLUS_LIVE_URL,
+  sourceUrl: RECORDPLUS_LIVE_URL,
+  authRequired: true,
+  networkLabel: 'RECORD',
+  programs: [['RECORD Nacional', 'Ao vivo no RecordPlus'], ['Jornalismo RECORD', 'A seguir'], ['Programação RECORD', 'Confira no RecordPlus']],
+};
+
+const recordNewsChannel = {
+  id: 'record-news',
+  name: 'RECORD News',
+  mark: 'record-news',
+  playbackType: 'embed',
+  embedProvider: 'youtube',
+  embedUrl: RECORD_NEWS_YOUTUBE_EMBED_URL,
+  sourceUrl: 'https://www.youtube.com/@recordnews/live',
+  networkLabel: 'RECORD NEWS',
+  programs: [['RECORD News Ao Vivo', 'Ao vivo'], ['Jornalismo 24h', 'No ar'], ['Últimas notícias', 'A seguir']],
 };
 
 const sbtNewsChannel = {
@@ -223,6 +288,33 @@ function createRedeTvChannel(regionId) {
   };
 }
 
+function getRecordRegionalChannel(regionId) {
+  const regional = recordRegionalCatalog[regionId];
+  if (!regional) return null;
+  return {
+    ...recordNationalChannel,
+    id: `record-${regionId}`,
+    name: regional.label,
+    regionId,
+    regionalLabel: regional.label,
+    regionalAvailability: regional.liveAvailability,
+  };
+}
+
+function getRegionalStationSummary(regionId) {
+  const region = getRegionOption(regionId);
+  const globo = globoRegionalCatalog[regionId];
+  const record = getRecordRegionalChannel(regionId);
+  const band = bandRegionalCatalog[regionId];
+  return [
+    { id: 'globo', name: globo?.label || 'Globo regional', detail: 'Globoplay' },
+    { id: 'record-national', name: recordNationalChannel.name, detail: 'RecordPlus · cadastro/login' },
+    { id: 'record-regional', name: record?.name || `RECORD Regional · ${region.label}`, detail: record?.regionalAvailability === 'unverified' ? 'RecordPlus · disponibilidade a validar' : 'RecordPlus · sinal regional confirmado' },
+    { id: 'band', name: band?.label || 'Band Nacional', detail: band ? 'Player oficial integrado' : 'Sinal nacional' },
+    { id: 'record-news', name: recordNewsChannel.name, detail: 'Player oficial integrado' },
+  ];
+}
+
 function getRegionOption(regionId) {
   return regionOptions.find((option) => option.regionId === regionId) || regionOptions[0];
 }
@@ -231,14 +323,15 @@ function getChannelsForRegion(regionId) {
   const region = getRegionOption(regionId);
   const regionalGlobo = {
     id: region.regionId === 'mg-bh' ? 'globo-minas' : `globo-${region.regionId}`,
-    name: region.channelName,
+    name: globoRegionalCatalog[region.regionId]?.label || 'Globo regional',
     mark: 'globo',
     playbackType: 'external',
     externalUrl: GLOBO_LIVE_URL,
+    externalProviderLabel: 'Globoplay',
     regionId: region.regionId,
     programs: [['Globo ao vivo', 'Disponível no Globoplay'], ['Programação local', 'Consulte no Globoplay'], ['Jornal local', 'Consulte no Globoplay']],
   };
-  return [baseChannels[0], createSbtChannel(regionId), sbtNewsChannel, createBandChannel(regionId), createRedeTvChannel(regionId), regionalGlobo, ...baseChannels.slice(1)];
+  return [baseChannels[0], createSbtChannel(regionId), sbtNewsChannel, recordNewsChannel, createBandChannel(regionId), createRedeTvChannel(regionId), regionalGlobo, ...baseChannels.slice(1)];
 }
 
 function readStoredRegion() {
@@ -248,6 +341,35 @@ function readStoredRegion() {
   } catch {
     return null;
   }
+}
+
+function readStoredProviderAccounts() {
+  const defaultAccounts = Object.fromEntries(Object.keys(accountProviders).map((providerId) => [providerId, { status: PROVIDER_STATUS.DISCONNECTED }]));
+  try {
+    const storedAccounts = JSON.parse(window.localStorage.getItem(PROVIDER_ACCOUNTS_STORAGE_KEY));
+    if (!storedAccounts || typeof storedAccounts !== 'object') return defaultAccounts;
+    return Object.fromEntries(Object.keys(accountProviders).map((providerId) => {
+      const storedAccount = storedAccounts[providerId];
+      const status = Object.values(PROVIDER_STATUS).includes(storedAccount?.status) ? storedAccount.status : PROVIDER_STATUS.DISCONNECTED;
+      return [providerId, {
+        status,
+        ...(typeof storedAccount?.lastVerifiedAt === 'string' ? { lastVerifiedAt: storedAccount.lastVerifiedAt } : {}),
+      }];
+    }));
+  } catch {
+    return defaultAccounts;
+  }
+}
+
+function writeStoredProviderAccounts(accounts) {
+  const safeAccounts = Object.fromEntries(Object.keys(accountProviders).map((providerId) => {
+    const account = accounts[providerId] || { status: PROVIDER_STATUS.DISCONNECTED };
+    return [providerId, {
+      status: account.status,
+      ...(account.lastVerifiedAt ? { lastVerifiedAt: account.lastVerifiedAt } : {}),
+    }];
+  }));
+  window.localStorage.setItem(PROVIDER_ACCOUNTS_STORAGE_KEY, JSON.stringify(safeAccounts));
 }
 
 function resolveRegionFromCoordinates(latitude, longitude) {
@@ -561,7 +683,7 @@ function Brand() {
 function ChannelMark({ variant }) {
   return (
     <span className={`channel-mark ${variant}`} aria-hidden="true">
-      {variant === 'tv-senado' ? <><span>tv</span><em>senado</em></> : variant === 'tv-justica' ? 'O' : variant === 'globo' ? 'G' : variant === 'sbt' ? 'SBT' : variant === 'band' ? 'BAND' : variant === 'redetv' ? 'RTV' : ''}
+      {variant === 'tv-senado' ? <><span>tv</span><em>senado</em></> : variant === 'tv-justica' ? 'O' : variant === 'globo' ? 'G' : variant === 'sbt' ? 'SBT' : variant === 'band' ? 'BAND' : variant === 'redetv' ? 'RTV' : variant === 'record' || variant === 'record-news' ? 'R' : ''}
     </span>
   );
 }
@@ -609,6 +731,10 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
   const [programName, programTime] = channel.programs[0];
   const isExternal = channel.playbackType === 'external';
   const isEmbed = channel.playbackType === 'embed';
+  const externalProviderLabel = channel.externalProviderLabel || 'site oficial';
+  const externalNotice = channel.authRequired
+    ? `Transmissão oficial disponível no ${externalProviderLabel}. Cadastro ou login pode ser solicitado.`
+    : `Transmissão oficial disponível no ${externalProviderLabel}.`;
   const [controlsVisible, setControlsVisible] = useState(false);
   const controlsTimerRef = useRef(null);
   const isInteractingRef = useRef(false);
@@ -673,8 +799,8 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
         <div className="hero-external-card">
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
-          <span>Transmissão oficial disponível no Globoplay.</span>
-          <a href={channel.externalUrl} target="_blank" rel="noreferrer">Abrir no Globoplay</a>
+          <span>{externalNotice}</span>
+          <a href={channel.externalUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${externalProviderLabel} para ${channel.name}`}>Abrir no {externalProviderLabel}</a>
         </div>
       ) : isEmbed ? (
         <EmbedSurface
@@ -950,6 +1076,10 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
   const touchStartRef = useRef(null);
   const suppressClickRef = useRef(false);
   const swipeFeedbackTimerRef = useRef(null);
+  const externalProviderLabel = channel.externalProviderLabel || 'site oficial';
+  const externalNotice = channel.authRequired
+    ? `Transmissão oficial no ${externalProviderLabel}. Cadastro ou login pode ser solicitado.`
+    : `Transmissão oficial disponível no ${externalProviderLabel}.`;
 
   const togglePlayback = async () => {
     const video = videoRef.current;
@@ -1071,8 +1201,8 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
         <div className="mobile-external-card">
           <ChannelMark variant={channel.mark} />
           <strong>{channel.name}</strong>
-          <span>Transmissão oficial disponível no Globoplay.</span>
-          <a href={channel.externalUrl} target="_blank" rel="noreferrer">Abrir no Globoplay</a>
+          <span>{externalNotice}</span>
+          <a href={channel.externalUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${externalProviderLabel} para ${channel.name}`}>Abrir no {externalProviderLabel}</a>
         </div>
       ) : channel.playbackType === 'embed' ? (
         <EmbedSurface
@@ -1171,18 +1301,86 @@ function MobileBottomNav({ activeIndex, onSelect }) {
   );
 }
 
-function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess }) {
+function getProviderStatusLabel(status) {
+  return {
+    [PROVIDER_STATUS.DISCONNECTED]: 'Não conectado',
+    [PROVIDER_STATUS.CONNECTING]: 'Conectando',
+    [PROVIDER_STATUS.CONNECTED]: 'Conectado',
+    [PROVIDER_STATUS.EXPIRED]: 'Reconexão necessária',
+    [PROVIDER_STATUS.ERROR]: 'Erro de conexão',
+  }[status] || 'Não conectado';
+}
+
+function ProviderAccountCard({ provider, account, onConnect, onDisconnect }) {
+  const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
+  const isConnected = status === PROVIDER_STATUS.CONNECTED;
+  const needsReconnect = status === PROVIDER_STATUS.EXPIRED || status === PROVIDER_STATUS.ERROR;
+  const actionLabel = isConnected ? 'Gerenciar' : needsReconnect ? 'Reconectar' : 'Conectar';
+
+  return (
+    <article className={`provider-account-card status-${status}`}>
+      <ChannelMark variant={provider.mark} />
+      <div className="provider-account-copy">
+        <strong>{provider.label}</strong>
+        <span className="provider-account-status"><i aria-hidden="true" />{getProviderStatusLabel(status)}</span>
+        {account?.lastVerifiedAt && <small>Verificado recentemente</small>}
+      </div>
+      {isConnected ? (
+        <button type="button" className="provider-account-action secondary" onClick={() => onDisconnect(provider.id)}>Desconectar</button>
+      ) : (
+        <button type="button" className="provider-account-action" onClick={() => onConnect(provider.id)}>{actionLabel}</button>
+      )}
+    </article>
+  );
+}
+
+function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess, providerAccounts, onConnectProvider, onDisconnectProvider, accountNotice }) {
+  const selectRef = useRef(null);
+  const stationSummary = getRegionalStationSummary(selectedRegionId);
+
+  useEffect(() => {
+    selectRef.current?.focus();
+    const handleDialogKeyDown = (event) => {
+      if (event.key === 'Escape' && !isFirstAccess) onClose();
+    };
+    document.addEventListener('keydown', handleDialogKeyDown);
+    return () => document.removeEventListener('keydown', handleDialogKeyDown);
+  }, [isFirstAccess, onClose]);
+
   return (
     <div className="region-dialog-backdrop" role="presentation">
-      <section className="region-dialog" role="dialog" aria-modal="true" aria-labelledby="region-dialog-title">
+      <section className="region-dialog" role="dialog" aria-modal="true" aria-labelledby="region-dialog-title" aria-describedby="region-dialog-description">
         <div className="region-dialog-kicker">BrasilTvLive</div>
-        <h2 id="region-dialog-title">{isFirstAccess ? 'Canais da sua região' : 'Região'}</h2>
-        <p>{isFirstAccess ? 'Escolha sua região para encontrarmos a programação local, incluindo a afiliada Globo disponível no Globoplay.' : 'A região define a variante local exibida no catálogo.'}</p>
+        <h2 id="region-dialog-title">{isFirstAccess ? 'Canais da sua região' : 'Configurações'}</h2>
+        <p id="region-dialog-description">{isFirstAccess ? 'Escolha sua região para exibirmos as emissoras e afiliadas disponíveis na sua praça.' : 'Gerencie sua praça e as contas usadas pelos canais que exigem autenticação.'}</p>
         <label className="region-dialog-label" htmlFor="region-select">Região atual</label>
-        <select id="region-select" value={selectedRegionId} onChange={(event) => onSelectedRegionChange(event.target.value)}>
+        <select ref={selectRef} id="region-select" value={selectedRegionId} onChange={(event) => onSelectedRegionChange(event.target.value)}>
           {regionOptions.map((option) => <option key={option.regionId} value={option.regionId}>{option.label}</option>)}
         </select>
-        <div className="region-dialog-preview"><strong>{getRegionOption(selectedRegionId).channelName}</strong><span>abre a transmissão oficial no Globoplay</span></div>
+        <div className="region-dialog-preview" aria-labelledby="region-dialog-preview-title">
+          <strong id="region-dialog-preview-title">Canais disponíveis nesta praça</strong>
+          <ul>
+            {stationSummary.map((station) => <li key={station.id}><span>{station.name}</span><small>{station.detail}</small></li>)}
+          </ul>
+        </div>
+        {!isFirstAccess && <section className="accounts-section" aria-labelledby="accounts-section-title">
+          <div className="accounts-section-heading">
+            <div>
+              <h3 id="accounts-section-title">Contas de TV</h3>
+              <p>As sessões pertencem aos provedores. O BrasilTvLive não armazena senhas, tokens ou cookies.</p>
+            </div>
+          </div>
+          <div className="provider-account-list">
+            {Object.values(accountProviders).map((provider) => <ProviderAccountCard
+              key={provider.id}
+              provider={provider}
+              account={providerAccounts?.[provider.id]}
+              onConnect={onConnectProvider}
+              onDisconnect={onDisconnectProvider}
+            />)}
+          </div>
+          {accountNotice && <p className="account-notice" role="status" aria-live="polite">{accountNotice}</p>}
+        </section>}
         {locationError && <p className="region-dialog-error" role="alert">{locationError}</p>}
         <div className="region-dialog-actions">
           <button type="button" className="region-secondary-button" onClick={onUseLocation} disabled={isLocating}>{isLocating ? 'Localizando…' : 'Usar localização'}</button>
@@ -1242,6 +1440,8 @@ function App() {
   const [regionDraft, setRegionDraft] = useState(() => readStoredRegion()?.regionId || regionOptions[0].regionId);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState(null);
+  const [providerAccounts, setProviderAccounts] = useState(() => readStoredProviderAccounts());
+  const [accountNotice, setAccountNotice] = useState(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState(0);
   const [isWatching, setIsWatching] = useState(false);
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
@@ -1272,6 +1472,7 @@ function App() {
     setRegionDraft(region?.regionId || regionOptions[0].regionId);
     setRegionSource(region?.source || 'manual');
     setLocationError(null);
+    setAccountNotice(null);
     setIsRegionDialogOpen(true);
   };
 
@@ -1289,6 +1490,24 @@ function App() {
     setActiveChannelIndex(0);
     remote.selectProgram(0, 0);
     setIsRegionDialogOpen(false);
+  };
+
+  const handleProviderConnect = (providerId) => {
+    const provider = accountProviders[providerId];
+    if (!provider) return;
+    setAccountNotice(`O login oficial de ${provider.label} será habilitado na próxima etapa. Nenhuma credencial é armazenada pelo BrasilTvLive.`);
+  };
+
+  const handleProviderDisconnect = (providerId) => {
+    setProviderAccounts((currentAccounts) => {
+      const nextAccounts = {
+        ...currentAccounts,
+        [providerId]: { status: PROVIDER_STATUS.DISCONNECTED },
+      };
+      writeStoredProviderAccounts(nextAccounts);
+      return nextAccounts;
+    });
+    setAccountNotice(`Sessão de ${accountProviders[providerId]?.label || 'provedor'} removida deste dispositivo.`);
   };
 
   const useDeviceLocation = () => {
@@ -1522,6 +1741,10 @@ function App() {
         locationError={locationError}
         onClose={() => setIsRegionDialogOpen(false)}
         isFirstAccess={!region}
+        providerAccounts={providerAccounts}
+        onConnectProvider={handleProviderConnect}
+        onDisconnectProvider={handleProviderDisconnect}
+        accountNotice={accountNotice}
       />}
     </>
   );
