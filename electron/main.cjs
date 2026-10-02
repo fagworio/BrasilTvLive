@@ -83,9 +83,15 @@ function setProviderLayer(layer = 'foreground') {
   if (!providerView || !mainWindow || mainWindow.isDestroyed()) return false;
   providerLayer = layer === 'background' ? 'background' : 'foreground';
   if (providerLayer === 'background') {
-    mainWindow.contentView.addChildView(providerView, 0);
+    // BaseWindow/WebContentsView stacking is explicit: reinsert both views so
+    // the official player is below the BrasilTvLive shell in preview mode.
+    mainWindow.contentView.removeChildView(providerView);
+    mainWindow.contentView.addChildView(providerView);
+    mainWindow.contentView.removeChildView(appView);
+    mainWindow.contentView.addChildView(appView);
     focusAppView();
   } else {
+    mainWindow.contentView.removeChildView(providerView);
     mainWindow.contentView.addChildView(providerView);
     focusProviderView();
   }
