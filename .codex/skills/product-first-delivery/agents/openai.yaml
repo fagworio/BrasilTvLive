@@ -1,0 +1,3 @@
+interface:
+  display_name: "Product First Delivery"
+  short_description: "Deliver visible product slices without infrastructure drift."
