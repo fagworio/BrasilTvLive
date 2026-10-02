@@ -1942,6 +1942,20 @@ function App() {
         return;
       }
       if (!event?.providerId) return;
+      if (event.status === 'player') {
+        setProviderAccounts((currentAccounts) => {
+          const nextAccounts = {
+            ...currentAccounts,
+            [event.providerId]: {
+              ...(currentAccounts[event.providerId] || {}),
+              status: PROVIDER_STATUS.CONNECTED,
+              lastVerifiedAt: new Date().toISOString(),
+            },
+          };
+          writeStoredProviderAccounts(nextAccounts);
+          return nextAccounts;
+        });
+      }
       setProviderHandoff((current) => ({ ...(current || {}), ...event, surface: 'desktop' }));
     });
   }, [activeChannelIndex, isMobile, region?.regionId]);

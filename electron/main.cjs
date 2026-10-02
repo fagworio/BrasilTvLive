@@ -39,6 +39,27 @@ function removeProviderView(reason = 'closed') {
   sendProviderState({ ...(providerState || {}), status: 'closed', reason });
 }
 
+function continuePendingProviderChannel(navigatedUrl) {
+  const pending = providerState;
+  if (pending?.providerId !== 'recordplus' || !pending.channelUrl || pending.status === 'player') return;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(navigatedUrl);
+  } catch {
+    return;
+  }
+
+  if (parsedUrl.origin !== 'https://www.recordplus.com' || !['/', '/home'].includes(parsedUrl.pathname)) return;
+
+  const targetUrl = pending.channelUrl;
+  sendProviderState({ ...pending, status: 'loading', currentUrl: navigatedUrl });
+  setTimeout(() => {
+    if (!providerView || providerState?.channelUrl !== targetUrl) return;
+    providerView.webContents.loadURL(targetUrl);
+  }, 0);
+}
+
 function attachProviderView({ providerId, url, channelUrl, channelName }) {
   if (!mainWindow || !url) return { status: 'error', reason: 'missing-url' };
 
@@ -83,7 +104,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
     providerView.webContents.on('did-stop-loading', () => {
       sendProviderState({ ...(providerState || {}), providerId, status: providerState?.status === 'player' ? 'player' : 'open' });
     });
-    providerView.webContents.on('did-navigate', (_event, navigatedUrl) => {
+    const handleProviderNavigation = (_event, navigatedUrl) => {
       const isPlayer = navigatedUrl.includes('/player/');
       sendProviderState({
         ...(providerState || {}),
@@ -91,7 +112,10 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
         status: isPlayer ? 'player' : providerState?.status || 'open',
         currentUrl: navigatedUrl,
       });
-    });
+      if (!isPlayer) continuePendingProviderChannel(navigatedUrl);
+    };
+    providerView.webContents.on('did-navigate', handleProviderNavigation);
+    providerView.webContents.on('did-navigate-in-page', handleProviderNavigation);
     providerView.webContents.on('did-redirect-navigation', (_event, navigatedUrl) => {
       sendProviderState({ ...(providerState || {}), providerId, currentUrl: navigatedUrl });
     });
