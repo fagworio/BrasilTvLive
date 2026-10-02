@@ -1830,6 +1830,11 @@ function App() {
 
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
+      // A channel-triggered login is part of the viewing flow. Keep the
+      // provider surface in the same fullscreen shell used by the player so
+      // the login page never appears cropped inside the hero panel. Account
+      // management (without a channel target) remains inside RegionDialog.
+      setIsWatching(Boolean(channelUrl && channelName));
       providerTargetRef.current = { providerId, channelUrl, channelName };
       const nextHandoff = { providerId, channelUrl, channelName, mode: 'login', status: 'open', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
