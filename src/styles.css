@@ -140,6 +140,19 @@ button { font: inherit; }
 .provider-account-action { min-height: 32px; padding: 0 11px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 10px; font-weight: 800; cursor: pointer; white-space: nowrap; }
 .provider-account-action.secondary { border-color: rgba(255,255,255,.16); color: #dce4ee; background: transparent; }
 .account-notice { margin: 11px 0 0 !important; padding: 10px 11px; border-radius: 9px; color: #d8e6f4 !important; background: rgba(99,178,255,.1); font-size: 11px !important; }
+.provider-login-surface { display: grid; gap: 10px; }
+.provider-login-header { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
+.provider-login-header h3 { margin: 6px 0 0; color: #f1f5f9; font-size: 17px; }
+.provider-login-close { min-height: 30px; padding: 0 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; color: #dce4ee; background: transparent; font-size: 10px; font-weight: 700; cursor: pointer; }
+.provider-login-frame-wrap { min-height: 270px; overflow: hidden; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; background: #0a1018; }
+.provider-login-frame { display: block; width: 100%; height: 270px; border: 0; background: #fff; }
+.provider-login-blocked { display: grid; justify-items: start; align-content: center; gap: 9px; min-height: 270px; padding: 24px; color: #f7f9fb; background: linear-gradient(145deg, rgba(101,26,39,.55), rgba(10,16,24,.95)); }
+.provider-login-blocked .channel-mark { width: 42px; height: 42px; }
+.provider-login-blocked strong { color: #ffb1ba; font-size: 14px; letter-spacing: .08em; }
+.provider-login-blocked span, .provider-login-blocked small { color: #c7d0db; font-size: 11px; line-height: 1.45; }
+.provider-login-blocked small { color: #94a2b2; }
+.provider-login-status { margin: 0 !important; color: #c9d4df !important; font-size: 11px !important; }
+.provider-login-privacy { color: #8492a2; font-size: 10px; line-height: 1.45; }
 .region-dialog-error { margin-top: 13px !important; margin-bottom: 0 !important; color: #ff9aa5 !important; }
 .region-dialog-actions { display: flex; gap: 10px; margin-top: 20px; }
 .region-dialog-actions button, .region-close-button { min-height: 38px; padding: 0 13px; border-radius: 9px; font-size: 12px; font-weight: 700; cursor: pointer; }

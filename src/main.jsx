@@ -117,6 +117,7 @@ const REDETV_OFFICIAL_LIVE_URL = 'https://www.redetv.uol.com.br/aovivo/';
 const REDETV_DAILYMOTION_PLAYER_URL = 'https://geo.dailymotion.com/player/xgrus.js';
 const REDETV_DAILYMOTION_VIDEO_ID = 'kYe5OYErhldJ75Azib2';
 const RECORDPLUS_LIVE_URL = 'https://www.recordplus.com/';
+const RECORDPLUS_LOGIN_URL = 'https://www.recordplus.com/login?redirectTo=%2F';
 const RECORD_NEWS_YOUTUBE_CHANNEL_ID = 'UCuiLR4p6wQ3xLEm15pEn1Xw';
 const RECORD_NEWS_YOUTUBE_EMBED_URL = `https://www.youtube.com/embed/live_stream?channel=${RECORD_NEWS_YOUTUBE_CHANNEL_ID}&autoplay=1&mute=1&playsinline=1&rel=0&controls=0&enablejsapi=1&disablekb=1&fs=0`;
 
@@ -130,6 +131,7 @@ const accountProviders = {
     id: 'recordplus',
     label: 'RECORD / RecordPlus',
     mark: 'record',
+    embedStatus: 'blocked',
   },
 };
 
@@ -687,6 +689,70 @@ function ProviderSurface({ channel, account, className, onOpenAccounts }) {
       allow="autoplay; encrypted-media; fullscreen"
       allowFullScreen
     />
+  );
+}
+
+function ProviderLoginSurface({ providerId, onClose }) {
+  const closeButtonRef = useRef(null);
+  const provider = accountProviders[providerId];
+  const providerUrl = providerId === 'recordplus' ? RECORDPLUS_LOGIN_URL : GLOBO_LIVE_URL;
+  const [surfaceState, setSurfaceState] = useState('loading');
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  if (!provider) return null;
+
+  const handleFrameLoad = (event) => {
+    if (provider.embedStatus === 'blocked') {
+      setSurfaceState('blocked');
+      return;
+    }
+    try {
+      const frameUrl = event.currentTarget.contentDocument?.URL || event.currentTarget.contentWindow?.location?.href || '';
+      if (frameUrl.startsWith('chrome-error:') || frameUrl.includes('chromewebdata')) {
+        setSurfaceState('blocked');
+        return;
+      }
+    } catch { /* cross-origin providers intentionally keep their document private */ }
+    setSurfaceState('loaded');
+  };
+
+  return (
+    <div className="provider-login-surface" aria-labelledby="provider-login-title">
+      <div className="provider-login-header">
+        <div>
+          <span className="region-dialog-kicker">Superfície oficial</span>
+          <h3 id="provider-login-title">Conectar {provider.label}</h3>
+        </div>
+        <button ref={closeButtonRef} type="button" className="provider-login-close" onClick={onClose}>Voltar</button>
+      </div>
+      <div className="provider-login-frame-wrap">
+        {surfaceState === 'blocked' ? <div className="provider-login-blocked" role="alert">
+          <ChannelMark variant={provider.mark} />
+          <strong>WEB EMBED BLOCKED</strong>
+          <span>O RecordPlus permite o login em uma aba própria, mas bloqueou esta superfície dentro do BrasilTvLive.</span>
+          <small>Não vamos contornar CSP, X-Frame-Options, cookies de terceiros ou DRM. A próxima alternativa é uma surface nativa/WebView.</small>
+        </div> : <iframe
+          className="provider-login-frame"
+          src={providerUrl}
+          title={`Login oficial ${provider.label}`}
+          allow="autoplay; encrypted-media; fullscreen"
+          allowFullScreen
+          onLoad={handleFrameLoad}
+          onError={() => setSurfaceState('blocked')}
+        />}
+      </div>
+      <p className="provider-login-status" role="status" aria-live="polite">
+        {surfaceState === 'blocked'
+          ? 'O provedor não permitiu carregar a superfície dentro do BrasilTvLive.'
+          : surfaceState === 'loaded'
+            ? 'Superfície carregada. Faça o login diretamente no provedor, se solicitado.'
+            : 'Carregando a superfície oficial…'}
+      </p>
+      <small className="provider-login-privacy">A senha, os cookies e a sessão permanecem no navegador do provedor. O BrasilTvLive não recebe essas credenciais.</small>
+    </div>
   );
 }
 
@@ -1375,7 +1441,7 @@ function ProviderAccountCard({ provider, account, onConnect, onDisconnect }) {
   );
 }
 
-function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess, providerAccounts, onConnectProvider, onDisconnectProvider, accountNotice }) {
+function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess, providerAccounts, onConnectProvider, onDisconnectProvider, accountNotice, activeProviderLogin, onCloseProviderLogin }) {
   const selectRef = useRef(null);
   const stationSummary = getRegionalStationSummary(selectedRegionId);
 
@@ -1411,7 +1477,7 @@ function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegion
               <p>As sessões pertencem aos provedores. O BrasilTvLive não armazena senhas, tokens ou cookies.</p>
             </div>
           </div>
-          <div className="provider-account-list">
+          {activeProviderLogin ? <ProviderLoginSurface providerId={activeProviderLogin} onClose={onCloseProviderLogin} /> : <div className="provider-account-list">
             {Object.values(accountProviders).map((provider) => <ProviderAccountCard
               key={provider.id}
               provider={provider}
@@ -1419,7 +1485,7 @@ function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegion
               onConnect={onConnectProvider}
               onDisconnect={onDisconnectProvider}
             />)}
-          </div>
+          </div>}
           {accountNotice && <p className="account-notice" role="status" aria-live="polite">{accountNotice}</p>}
         </section>}
         {locationError && <p className="region-dialog-error" role="alert">{locationError}</p>}
@@ -1483,6 +1549,7 @@ function App() {
   const [locationError, setLocationError] = useState(null);
   const [providerAccounts, setProviderAccounts] = useState(() => readStoredProviderAccounts());
   const [accountNotice, setAccountNotice] = useState(null);
+  const [activeProviderLogin, setActiveProviderLogin] = useState(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState(0);
   const [isWatching, setIsWatching] = useState(false);
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
@@ -1514,6 +1581,7 @@ function App() {
     setRegionSource(region?.source || 'manual');
     setLocationError(null);
     setAccountNotice(null);
+    setActiveProviderLogin(null);
     setIsRegionDialogOpen(true);
   };
 
@@ -1536,6 +1604,11 @@ function App() {
   const handleProviderConnect = (providerId) => {
     const provider = accountProviders[providerId];
     if (!provider) return;
+    if (providerId === 'recordplus') {
+      setAccountNotice(null);
+      setActiveProviderLogin(providerId);
+      return;
+    }
     setAccountNotice(`O login oficial de ${provider.label} será habilitado na próxima etapa. Nenhuma credencial é armazenada pelo BrasilTvLive.`);
   };
 
@@ -1788,6 +1861,8 @@ function App() {
         onConnectProvider={handleProviderConnect}
         onDisconnectProvider={handleProviderDisconnect}
         accountNotice={accountNotice}
+        activeProviderLogin={activeProviderLogin}
+        onCloseProviderLogin={() => setActiveProviderLogin(null)}
       />}
     </>
   );
