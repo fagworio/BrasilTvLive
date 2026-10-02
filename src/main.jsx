@@ -132,6 +132,7 @@ const accountProviders = {
     label: 'RECORD / RecordPlus',
     mark: 'record',
     embedStatus: 'blocked',
+    fallbackUrl: RECORDPLUS_LOGIN_URL,
   },
 };
 
@@ -153,7 +154,7 @@ const globoRegionalCatalog = {
 };
 
 const recordRegionalCatalog = {
-  'mg-bh': { label: 'RECORD Minas', liveAvailability: 'confirmed' },
+  'mg-bh': { label: 'RECORD Minas', liveAvailability: 'confirmed', playerUrl: 'https://www.recordplus.com/player/channel/Y2hhbm5lbCNyNy5jb20jbWc' },
   'mg-uberlandia': { label: 'TV Paranaíba RECORD', liveAvailability: 'unverified' },
   'sp-capital': { label: 'RECORD São Paulo', liveAvailability: 'confirmed' },
   'rj-capital': { label: 'RECORD Rio', liveAvailability: 'confirmed' },
@@ -300,6 +301,7 @@ function getRecordRegionalChannel(regionId) {
     regionId,
     regionalLabel: regional.label,
     regionalAvailability: regional.liveAvailability,
+    providerUrl: regional.playerUrl || recordNationalChannel.providerUrl,
   };
 }
 
@@ -734,6 +736,7 @@ function ProviderLoginSurface({ providerId, onClose }) {
           <strong>WEB EMBED BLOCKED</strong>
           <span>O RecordPlus permite o login em uma aba própria, mas bloqueou esta superfície dentro do BrasilTvLive.</span>
           <small>Não vamos contornar CSP, X-Frame-Options, cookies de terceiros ou DRM. A próxima alternativa é uma surface nativa/WebView.</small>
+          <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir {provider.label} em nova aba</a>
         </div> : <iframe
           className="provider-login-frame"
           src={providerUrl}
