@@ -174,6 +174,13 @@ function getProviderLoginUrl(providerId, channelUrl) {
   return accountProviders[providerId]?.fallbackUrl || channelUrl;
 }
 
+function getProgramTimeLabel(channel, providerAccounts, time) {
+  if (channel?.provider === 'globoplay' && providerAccounts?.globoplay?.status === PROVIDER_STATUS.CONNECTED) {
+    return 'Ao vivo no Globoplay';
+  }
+  return time;
+}
+
 const globoRegionalCatalog = {
   'mg-bh': { label: 'Globo Minas', catalogUrl: GLOBO_REGION_CATALOG_URLS['mg-bh'] },
   'mg-uberlandia': { label: 'TV Integração', catalogUrl: GLOBO_REGION_CATALOG_URLS['mg-uberlandia'] },
@@ -732,7 +739,8 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
   const channelUrl = channel.providerUrl || provider?.fallbackUrl;
   const hasDirectPlayerUrl = Boolean(channelUrl);
   const isThisHandoff = providerHandoff?.providerId === channel.provider
-    && providerHandoff?.channelUrl === channelUrl;
+    && providerHandoff?.channelUrl === channelUrl
+    && (!providerHandoff?.channelName || providerHandoff.channelName === channel.name);
   const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
 
   useLayoutEffect(() => {
@@ -997,7 +1005,8 @@ function Sidebar({ focusedNav, selectedNav, onFocus, onSelect, navRefs }) {
 }
 
 function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError, providerAccounts, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
-  const [programName, programTime] = channel.programs[0];
+  const [programName, rawProgramTime] = channel.programs[0];
+  const programTime = getProgramTimeLabel(channel, providerAccounts, rawProgramTime);
   const isExternal = channel.playbackType === 'external';
   const isProvider = channel.playbackType === 'provider';
   const isEmbed = channel.playbackType === 'embed';
@@ -1146,7 +1155,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
   );
 }
 
-function Epg({ channels, isFocused, focusedRow, focusedCol, selectedProgram, onFocus, onSelect, programRefs }) {
+function Epg({ channels, providerAccounts, isFocused, focusedRow, focusedCol, selectedProgram, onFocus, onSelect, programRefs }) {
   return (
     <section className="epg" aria-label="Programação">
       <div className="epg-head">
@@ -1174,6 +1183,7 @@ function Epg({ channels, isFocused, focusedRow, focusedCol, selectedProgram, onF
               {channel.programs.map(([name, time], colIndex) => {
                 const isProgramFocused = isFocused && focusedRow === rowIndex && focusedCol === colIndex;
                 const isSelected = selectedProgram.row === rowIndex && selectedProgram.col === colIndex;
+                const displayTime = colIndex === 0 ? getProgramTimeLabel(channel, providerAccounts, time) : time;
                 return (
                 <button
                   className={`program-cell ${isSelected ? 'selected' : ''} ${isProgramFocused ? 'remote-focused' : ''}`}
@@ -1185,7 +1195,7 @@ function Epg({ channels, isFocused, focusedRow, focusedCol, selectedProgram, onF
                   onClick={() => onSelect(rowIndex, colIndex)}
                 >
                   <strong>{name}</strong>
-                  <small>{time}</small>
+                  <small>{displayTime}</small>
                 </button>
                 );
               })}
@@ -1792,13 +1802,10 @@ function App() {
 
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
-      // Keep the official surface in front while Globo/Record authentication is
-      // still happening. The shell can return to the muted preview with Back/Esc.
-      if (channelUrl) setIsWatching(true);
       providerTargetRef.current = { providerId, channelUrl, channelName };
-      const nextHandoff = { providerId, channelUrl, channelName, status: 'open', surface: 'desktop' };
+      const nextHandoff = { providerId, channelUrl, channelName, mode: 'login', status: 'open', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
-      desktop.openProviderSurface({ providerId, url: getProviderLoginUrl(providerId, channelUrl), channelUrl, channelName })
+      desktop.openProviderSurface({ providerId, url: getProviderLoginUrl(providerId, channelUrl), channelUrl, channelName, mode: 'login' })
         .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
         .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
       return;
@@ -1836,9 +1843,9 @@ function App() {
     if (desktop?.isDesktop) {
       setIsWatching(watch);
       providerTargetRef.current = { providerId, channelUrl, channelName };
-      const nextHandoff = { providerId, channelUrl, channelName, status: 'player', surface: 'desktop' };
+      const nextHandoff = { providerId, channelUrl, channelName, mode: 'player', status: 'player', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
-      desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName })
+      desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName, mode: 'player' })
         .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
         .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
       return;
@@ -1881,7 +1888,9 @@ function App() {
     const channelUrl = activeChannel.providerUrl || accountProviders[activeChannel.provider]?.fallbackUrl;
     if (!channelUrl) return;
     const currentTarget = providerTargetRef.current;
-    if (currentTarget?.providerId === activeChannel.provider && currentTarget.channelUrl === channelUrl) return;
+    if (currentTarget?.providerId === activeChannel.provider
+      && currentTarget.channelUrl === channelUrl
+      && currentTarget.channelName === activeChannel.name) return;
 
     openProviderChannel({
       providerId: activeChannel.provider,
@@ -1902,7 +1911,7 @@ function App() {
     if (!desktop?.isDesktop || !activeChannel?.provider || !accountProviders[activeChannel.provider]?.desktopSurface || providerHandoff?.surface !== 'desktop') return;
     const isOpen = ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
     if (!isOpen) return;
-    const shouldPreviewBehindApp = providerHandoff.status === 'player' && !isWatching;
+    const shouldPreviewBehindApp = providerHandoff.status === 'player' && providerHandoff.mode !== 'login' && !isWatching;
     desktop.setProviderLayer?.(shouldPreviewBehindApp ? 'background' : 'foreground');
   }, [activeChannel?.provider, isWatching, providerHandoff?.status, providerHandoff?.surface]);
 
@@ -1995,8 +2004,8 @@ function App() {
       const channelUrl = selectedChannel.providerUrl || provider?.fallbackUrl;
       const isConnected = providerAccounts[selectedChannel.provider]?.status === PROVIDER_STATUS.CONNECTED;
       if (isConnected) {
-        setIsWatching(true);
-        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name, watch: true });
+        setIsWatching(false);
+        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name, watch: false });
       } else {
         setIsWatching(false);
         openProviderLogin({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name });
@@ -2103,14 +2112,26 @@ function App() {
         return;
       }
       if (!event?.providerId) return;
-      const isCurrentProviderTarget = event.providerId === providerTargetRef.current?.providerId
-        && (!event.channelUrl || event.channelUrl === providerTargetRef.current?.channelUrl);
+      const providerTarget = providerTargetRef.current;
+      const isCurrentProviderTarget = event.providerId === providerTarget?.providerId
+        && (!event.channelUrl || event.channelUrl === providerTarget?.channelUrl)
+        && (!event.channelName || event.channelName === providerTarget?.channelName);
       if (isCurrentProviderTarget && event.channelUrl && ['auth-required', 'loading', 'player'].includes(event.status)) {
-        const requestedChannelIndex = channels.findIndex((channel) => channel.provider === event.providerId && channel.providerUrl === event.channelUrl);
+        const requestedChannelIndex = channels.findIndex((channel) => channel.provider === event.providerId
+          && (event.channelName ? channel.name === event.channelName : channel.providerUrl === event.channelUrl));
         if (requestedChannelIndex >= 0 && requestedChannelIndex !== activeChannelIndex) {
           setActiveChannelIndex(requestedChannelIndex);
           remote.selectProgram(requestedChannelIndex, 0);
         }
+      }
+      if (isCurrentProviderTarget && event.reason === 'oauth-closed' && providerTarget?.channelUrl) {
+        openProviderChannel({
+          providerId: providerTarget.providerId,
+          channelUrl: providerTarget.channelUrl,
+          channelName: providerTarget.channelName,
+          watch: false,
+        });
+        return;
       }
       if (event.status === 'player') {
         setProviderAccounts((currentAccounts) => {
@@ -2142,7 +2163,12 @@ function App() {
         setShowChannelNotice(false);
         setPlayerError(false);
       }
-      setProviderHandoff((current) => ({ ...(current || {}), ...event, surface: 'desktop' }));
+      setProviderHandoff((current) => ({
+        ...(current || {}),
+        ...event,
+        mode: event.status === 'player' ? 'player' : event.mode || current?.mode,
+        surface: 'desktop',
+      }));
     });
   }, [activeChannelIndex, channels, isMobile, region?.regionId]);
 
@@ -2223,6 +2249,7 @@ function App() {
             />
             <Epg
               channels={channels}
+              providerAccounts={providerAccounts}
               isFocused={remote.focusArea === 'epg'}
               focusedRow={remote.focusedRow}
               focusedCol={remote.focusedCol}

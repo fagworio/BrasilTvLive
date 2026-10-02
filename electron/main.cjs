@@ -9,7 +9,10 @@ const projectRoot = path.resolve(__dirname, '..');
 const rendererPreload = path.join(__dirname, 'preload.cjs');
 const providerPreload = path.join(__dirname, 'provider-preload.cjs');
 
-app.commandLine.appendSwitch('disable-gpu');
+// Keep Chromium's normal graphics/media path for Globoplay's protected player.
+// Set BRASILTVLIVE_DISABLE_GPU=1 only as a local fallback for machines with a
+// known GPU driver problem.
+if (process.env.BRASILTVLIVE_DISABLE_GPU === '1') app.commandLine.appendSwitch('disable-gpu');
 // RecordPlus renders Google Identity Services in a cross-origin iframe. FedCM
 // can be unavailable in that embedded context, leaving the social button inert;
 // use the provider's regular OAuth popup flow instead.
@@ -102,7 +105,7 @@ function removeProviderView(reason = 'closed') {
 function hideProviderView(reason = 'hidden') {
   if (!providerView) return providerState;
   if (reason === 'back') {
-    sendProviderState({ ...(providerState || {}), status: 'player', reason });
+    sendProviderState({ ...(providerState || {}), mode: 'player', status: 'player', reason });
     focusAppView();
     return providerState;
   }
@@ -166,7 +169,7 @@ function isProviderLoginUrl(providerId, navigatedUrl) {
   return false;
 }
 
-function attachProviderView({ providerId, url, channelUrl, channelName }) {
+function attachProviderView({ providerId, url, channelUrl, channelName, mode = 'player' }) {
   if (!mainWindow || !url) return { status: 'error', reason: 'missing-url' };
 
   const isSameProvider = providerState?.providerId === providerId;
@@ -217,6 +220,10 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
         if (!isMainFrame || errorCode === -3) return;
         console.error(`[${providerId}] OAuth window failed: ${errorCode} ${errorDescription} ${validatedUrl}`);
       });
+      childWindow.on('closed', () => {
+        if (providerState?.providerId !== providerId || providerState?.mode !== 'login') return;
+        sendProviderState({ ...providerState, mode: 'player', status: 'player', reason: 'oauth-closed' });
+      });
     });
     providerView.webContents.on('console-message', (_event, _level, message, line, sourceId) => {
       console.log(`[${providerId}] ${sourceId}:${line} ${message}`);
@@ -228,10 +235,14 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       const currentUrl = providerView.webContents.getURL();
       const isLogin = isProviderLoginUrl(providerId, currentUrl);
       const isPlayer = isProviderPlayerUrl(providerId, currentUrl, providerState?.channelUrl);
+      const isGloboLoginSurface = providerId === 'globoplay'
+        && providerState?.mode === 'login'
+        && !isLogin
+        && !isPlayer;
       sendProviderState({
         ...(providerState || {}),
         providerId,
-        status: isLogin ? 'auth-required' : isPlayer || providerState?.status === 'player' ? 'player' : 'open',
+        status: isLogin ? 'auth-required' : isGloboLoginSurface ? 'open' : isPlayer || providerState?.status === 'player' ? 'player' : 'open',
         currentUrl,
       });
     });
@@ -240,10 +251,14 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
       const isPlayer = isProviderPlayerUrl(providerId, navigatedUrl, providerState?.channelUrl);
       const isHome = isProviderHomeUrl(providerId, navigatedUrl);
       const isLogin = isProviderLoginUrl(providerId, navigatedUrl);
+      const isGloboLoginSurface = providerId === 'globoplay'
+        && providerState?.mode === 'login'
+        && !isLogin
+        && !isPlayer;
       sendProviderState({
         ...(providerState || {}),
         providerId,
-        status: isPlayer ? 'player' : isLogin ? 'auth-required' : isHome ? 'ready' : providerState?.status || 'open',
+        status: isGloboLoginSurface ? 'open' : isPlayer ? 'player' : isLogin ? 'auth-required' : isHome ? 'ready' : providerState?.status || 'open',
         currentUrl: navigatedUrl,
       });
       if (!isPlayer) continuePendingProviderChannel(navigatedUrl);
@@ -279,7 +294,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName }) {
   }
 
   applyProviderBounds({ visible: false });
-  providerState = { providerId, channelUrl, channelName, status: isProviderPlayerUrl(providerId, url, channelUrl) ? 'player' : 'open' };
+  providerState = { providerId, channelUrl, channelName, mode, status: mode === 'player' && isProviderPlayerUrl(providerId, url, channelUrl) ? 'player' : 'open' };
   providerView.webContents.loadURL(url);
   focusProviderView();
   sendProviderState(providerState);
