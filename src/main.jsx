@@ -451,6 +451,8 @@ function resolveRegionFromCoordinates(latitude, longitude) {
 }
 
 const MOBILE_QUERY = '(max-width: 56rem), (max-height: 40rem) and (pointer: coarse) and (hover: none)';
+const PREVIEW_LOAD_TIMEOUT_MS = 15000;
+const PLAYER_LOAD_TIMEOUT_MS = 20000;
 
 function getDesktopBridge() {
   return typeof window !== 'undefined' ? window.brasilTvLiveDesktop : undefined;
@@ -1040,7 +1042,7 @@ function Sidebar({ focusedNav, selectedNav, onFocus, onSelect, navRefs }) {
   );
 }
 
-function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError, providerAccounts, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
+function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, isPreviewLoading, previewError, showChannelNotice, volume, isMuted, onVolumeChange, onMuteToggle, onPlaybackStarted, onPlaybackError, providerAccounts, onOpenAccounts, onOpenProviderLogin, onOpenProviderChannel, providerHandoff }) {
   const [programName, rawProgramTime] = channel.programs[0];
   const programTime = getProgramTimeLabel(channel, providerAccounts, rawProgramTime);
   const isExternal = channel.playbackType === 'external';
@@ -1171,14 +1173,14 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
         {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId: channel.provider, channelUrl: channel.providerUrl, channelName: channel.name })}>Entrar para assistir</button>}
       </div>}
       <div className="hero-fade" />
-      <div className={`watch-transition ${!isWatching || (!isPlayerLoading && !showChannelNotice && !playerError) ? 'is-hidden' : ''}`} role="status" aria-live="polite">
-        <div className={`watch-transition-card ${playerError ? 'is-error' : ''}`}>
+      <div className={`watch-transition ${(!isWatching && !isPreviewLoading && !previewError) || (isWatching && !isPlayerLoading && !showChannelNotice && !playerError) ? 'is-hidden' : ''}`} role="status" aria-live="polite">
+        <div className={`watch-transition-card ${playerError || previewError ? 'is-error' : ''}`}>
           <ChannelMark variant={channel.mark} />
           <div>
             <strong>{channel.name}</strong>
-            <span>{playerError ? 'Transmissão indisponível' : isPlayerLoading ? 'Carregando canal' : 'Ao vivo'}</span>
+            <span>{playerError || previewError ? 'Transmissão indisponível' : isPlayerLoading || isPreviewLoading ? 'Carregando canal' : 'Ao vivo'}</span>
           </div>
-          {isPlayerLoading && <span className="watch-transition-spinner" aria-hidden="true" />}
+          {(isPlayerLoading || isPreviewLoading) && <span className="watch-transition-spinner" aria-hidden="true" />}
         </div>
       </div>
       {!isProvider && <div
@@ -1786,6 +1788,7 @@ function App() {
   const [activeChannelIndex, setActiveChannelIndex] = useState(0);
   const [isWatching, setIsWatching] = useState(false);
   const [isPlayerLoading, setIsPlayerLoading] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState('loading');
   const [playerError, setPlayerError] = useState(false);
   const [showChannelNotice, setShowChannelNotice] = useState(false);
   const [volume, setVolume] = useState(0.6);
@@ -1797,6 +1800,8 @@ function App() {
   const volumeRef = useRef(0.6);
   const volumeNoticeTimerRef = useRef(null);
   const channelNoticeTimerRef = useRef(null);
+  const previewTimeoutRef = useRef(null);
+  const playerTimeoutRef = useRef(null);
   const providerPopupTimerRef = useRef(null);
   const providerPopupRef = useRef(null);
   const providerTargetRef = useRef(null);
@@ -1811,6 +1816,10 @@ function App() {
   });
   const heroVideoRef = useRef(null);
   const activeChannel = channels[activeChannelIndex];
+  const activeChannelRef = useRef(activeChannel);
+  const isWatchingRef = useRef(isWatching);
+  activeChannelRef.current = activeChannel;
+  isWatchingRef.current = isWatching;
   const activeProviderStatus = activeChannel?.provider
     ? providerAccounts[activeChannel.provider]?.status
     : null;
@@ -1968,6 +1977,38 @@ function App() {
   }, [activeChannel?.provider, isMuted, isWatching, providerHandoff?.status]);
 
   useEffect(() => {
+    window.clearTimeout(previewTimeoutRef.current);
+    const channel = activeChannel;
+    if (!channel) return undefined;
+
+    if (channel.playbackType === 'external') {
+      setPreviewStatus('external');
+      return undefined;
+    }
+    if (channel.playbackType === 'provider') {
+      const connected = providerAccounts[channel.provider]?.status === PROVIDER_STATUS.CONNECTED;
+      setPreviewStatus(connected ? 'loading' : 'auth-required');
+      return undefined;
+    }
+
+    setPreviewStatus('loading');
+    previewTimeoutRef.current = window.setTimeout(() => {
+      if (activeChannelRef.current?.id === channel.id && !isWatchingRef.current) setPreviewStatus('error');
+    }, PREVIEW_LOAD_TIMEOUT_MS);
+    return () => window.clearTimeout(previewTimeoutRef.current);
+  }, [activeChannel?.id, activeChannel?.playbackType, activeChannel?.provider, providerAccounts]);
+
+  useEffect(() => {
+    const channel = activeChannel;
+    if (channel?.playbackType !== 'provider' || !providerHandoff || providerHandoff.providerId !== channel.provider) return;
+    const channelUrl = channel.providerUrl || accountProviders[channel.provider]?.fallbackUrl;
+    if (providerHandoff.channelUrl && providerHandoff.channelUrl !== channelUrl) return;
+    if (providerHandoff.status === 'error') setPreviewStatus('error');
+    if (['ready', 'player'].includes(providerHandoff.status)) setPreviewStatus('playing');
+    if (['open', 'loading', 'auth-required'].includes(providerHandoff.status)) setPreviewStatus('loading');
+  }, [activeChannel?.id, activeChannel?.provider, activeChannel?.providerUrl, providerHandoff?.providerId, providerHandoff?.channelUrl, providerHandoff?.status]);
+
+  useEffect(() => {
     const desktop = getDesktopBridge();
     if (!desktop?.isDesktop || !activeChannel?.provider || !accountProviders[activeChannel.provider]?.desktopSurface || providerHandoff?.surface !== 'desktop') return;
     const isOpen = ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
@@ -2057,6 +2098,7 @@ function App() {
     if (mainContent) mainContent.scrollTop = 0;
     if (selectedChannel?.playbackType === 'external') return;
     if (selectedChannel?.playbackType === 'provider') {
+      window.clearTimeout(playerTimeoutRef.current);
       if (!isDesktopProviderChannel(selectedChannel)) return;
       setIsPlayerLoading(false);
       setPlayerError(false);
@@ -2076,6 +2118,14 @@ function App() {
     setIsWatching(true);
     setPlayerError(false);
     setShowChannelNotice(true);
+    window.clearTimeout(playerTimeoutRef.current);
+    playerTimeoutRef.current = window.setTimeout(() => {
+      if (isWatchingRef.current && activeChannelRef.current?.id === selectedChannel.id) {
+        setIsPlayerLoading(false);
+        setPlayerError(true);
+        setShowChannelNotice(false);
+      }
+    }, PLAYER_LOAD_TIMEOUT_MS);
     const video = heroVideoRef.current;
     const alreadyPlaying = channelIndex === activeChannelIndex
       && video
@@ -2093,6 +2143,7 @@ function App() {
   };
 
   const stopViewing = () => {
+    window.clearTimeout(playerTimeoutRef.current);
     setIsWatching(false);
     setIsPlayerLoading(false);
     setPlayerError(false);
@@ -2233,6 +2284,9 @@ function App() {
         setShowChannelNotice(false);
         setPlayerError(false);
       }
+      if (isCurrentProviderTarget && event.status === 'hidden' && event.reason === 'back') {
+        setPreviewStatus('auth-required');
+      }
       setProviderHandoff((current) => ({
         ...(current || {}),
         ...event,
@@ -2258,12 +2312,18 @@ function App() {
   useEffect(() => () => {
     window.clearTimeout(volumeNoticeTimerRef.current);
     window.clearTimeout(channelNoticeTimerRef.current);
+    window.clearTimeout(previewTimeoutRef.current);
+    window.clearTimeout(playerTimeoutRef.current);
     window.clearInterval(providerPopupTimerRef.current);
   }, []);
 
   const handlePlaybackReady = (channelId) => {
     setIsAppLoading(false);
-    if (isWatching && activeChannel.id === channelId) {
+    if (activeChannelRef.current?.id !== channelId) return;
+    window.clearTimeout(previewTimeoutRef.current);
+    window.clearTimeout(playerTimeoutRef.current);
+    setPreviewStatus('playing');
+    if (isWatchingRef.current) {
       setIsPlayerLoading(false);
       setPlayerError(false);
       setShowChannelNotice(true);
@@ -2273,10 +2333,14 @@ function App() {
 
   const handlePlaybackError = (channelId) => {
     setIsAppLoading(false);
-    if (isWatching && activeChannel.id === channelId) {
+    if (activeChannelRef.current?.id !== channelId) return;
+    window.clearTimeout(previewTimeoutRef.current);
+    if (isWatchingRef.current) {
       setIsPlayerLoading(false);
       setPlayerError(true);
       setShowChannelNotice(false);
+    } else {
+      setPreviewStatus('error');
     }
   };
 
@@ -2304,6 +2368,8 @@ function App() {
               isWatching={isWatching}
               isPlayerLoading={isPlayerLoading}
               playerError={playerError}
+              isPreviewLoading={!isWatching && previewStatus === 'loading'}
+              previewError={!isWatching && previewStatus === 'error'}
               showChannelNotice={showChannelNotice}
               volume={volume}
               isMuted={isMuted}

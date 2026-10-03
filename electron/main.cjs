@@ -135,7 +135,14 @@ function removeProviderView(reason = 'closed') {
 function hideProviderView(reason = 'hidden') {
   if (!providerView) return providerState;
   if (reason === 'back') {
-    sendProviderState({ ...(providerState || {}), mode: 'player', status: 'player', reason });
+    const isLoginSurface = providerState?.mode === 'login';
+    if (isLoginSurface) applyProviderBounds({ visible: false });
+    sendProviderState({
+      ...(providerState || {}),
+      mode: isLoginSurface ? 'login' : 'player',
+      status: isLoginSurface ? 'hidden' : 'player',
+      reason,
+    });
     focusAppView();
     return providerState;
   }
