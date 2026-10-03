@@ -3,7 +3,7 @@
 - **Data:** 2026-10-03
 - **Ambiente:** Linux, Electron em modo dev, Vite local, Chromium DevTools Protocol
 - **Branch:** `main`
-- **Commit base:** `2ec16cd`
+- **Commit validado:** `b1aa65e`
 
 ## Resultado por fase
 
