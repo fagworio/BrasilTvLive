@@ -2,6 +2,9 @@ const { app, BaseWindow, WebContentsView, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const http = require('node:http');
+const { isAllowedProviderUrl, validateProviderRequest } = require('./providers/registry.cjs');
+const recordPlusProvider = require('./providers/recordplus.cjs');
+const globoplayProvider = require('./providers/globoplay.cjs');
 
 const isDevelopment = process.argv.includes('--dev');
 const devServerUrl = 'http://127.0.0.1:5173';
@@ -52,38 +55,17 @@ function clearProviderFullscreenTimer() {
 
 function applyProviderVideoPresentation() {
   if (!providerView || providerView.webContents.isDestroyed()) return;
-  providerView.webContents.insertCSS(`
-    video {
-      object-fit: cover !important;
-    }
-  `).catch(() => {});
+  if (providerState?.providerId === 'globoplay') {
+    globoplayProvider.applyVideoPresentation(providerView.webContents);
+  }
 }
 
 function requestGloboplayPlayerFullscreen(attempt = 0) {
   if (!providerView || providerView.webContents.isDestroyed()) return;
   if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
-
-  providerView.webContents.executeJavaScript(`(() => {
-    const player = document.querySelector('#wp3-player-1');
-    const fullscreenButton = player?.querySelector('[data-fullscreen]');
-    if (!player || !fullscreenButton) return { ready: false, fullscreen: false };
-
-    const isFullscreen = Boolean(document.fullscreenElement) || player.classList.contains('fullscreen');
-    if (!isFullscreen) fullscreenButton.click();
-
-    return {
-      ready: true,
-      fullscreen: Boolean(document.fullscreenElement) || player.classList.contains('fullscreen'),
-    };
-  })()`, true).then((result) => {
-    if (!providerView || providerView.webContents.isDestroyed()) return;
-    if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
-    if (result?.fullscreen || attempt >= 12) return;
-    providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(attempt + 1), 350);
-  }).catch(() => {
-    if (attempt >= 12) return;
-    providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(attempt + 1), 350);
-  });
+  globoplayProvider.requestPlayerFullscreen(providerView.webContents, providerState, (nextAttempt) => {
+    providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(nextAttempt), 350);
+  }, attempt);
 }
 
 function scheduleProviderPlayerFullscreen() {
@@ -165,16 +147,7 @@ function hideProviderView(reason = 'hidden') {
 
 function continuePendingProviderChannel(navigatedUrl) {
   const pending = providerState;
-  if (pending?.providerId !== 'recordplus' || !pending.channelUrl || !pending.channelUrl.includes('/player/') || pending.status === 'player') return;
-
-  let parsedUrl;
-  try {
-    parsedUrl = new URL(navigatedUrl);
-  } catch {
-    return;
-  }
-
-  if (parsedUrl.origin !== 'https://www.recordplus.com' || !['/', '/home'].includes(parsedUrl.pathname)) return;
+  if (!recordPlusProvider.shouldContinuePendingChannel(pending, navigatedUrl)) return;
 
   const targetUrl = pending.channelUrl;
   sendProviderState({ ...pending, status: 'loading', currentUrl: navigatedUrl });
@@ -185,40 +158,30 @@ function continuePendingProviderChannel(navigatedUrl) {
 }
 
 function isProviderPlayerUrl(providerId, navigatedUrl, targetUrl = providerState?.channelUrl) {
-  try {
-    const parsedUrl = new URL(navigatedUrl);
-    if (providerId === 'recordplus') return parsedUrl.origin === 'https://www.recordplus.com' && parsedUrl.pathname.startsWith('/player/');
-    if (providerId === 'globoplay') {
-      const target = targetUrl ? new URL(targetUrl) : null;
-      return parsedUrl.origin === 'https://globoplay.globo.com'
-        && Boolean(target)
-        && parsedUrl.pathname === target.pathname
-        && parsedUrl.pathname.includes('/ao-vivo/');
-    }
-  } catch { /* provider navigations are expected to be absolute URLs */ }
+  if (providerId === 'recordplus') return recordPlusProvider.isPlayerUrl(navigatedUrl);
+  if (providerId === 'globoplay') return globoplayProvider.isPlayerUrl(navigatedUrl, targetUrl);
   return false;
 }
 
 function isProviderHomeUrl(providerId, navigatedUrl) {
-  try {
-    const parsedUrl = new URL(navigatedUrl);
-    if (providerId === 'recordplus') return parsedUrl.origin === 'https://www.recordplus.com' && ['/', '/home'].includes(parsedUrl.pathname);
-    if (providerId === 'globoplay') return parsedUrl.origin === 'https://globoplay.globo.com' && parsedUrl.pathname === '/';
-  } catch { /* provider navigations are expected to be absolute URLs */ }
+  if (providerId === 'recordplus') return recordPlusProvider.isHomeUrl(navigatedUrl);
+  if (providerId === 'globoplay') return globoplayProvider.isHomeUrl(navigatedUrl);
   return false;
 }
 
 function isProviderLoginUrl(providerId, navigatedUrl) {
-  try {
-    const parsedUrl = new URL(navigatedUrl);
-    if (providerId === 'recordplus') return parsedUrl.origin === 'https://www.recordplus.com' && parsedUrl.pathname.startsWith('/login');
-    return parsedUrl.hostname === 'login.globo.com';
-  } catch { /* provider navigations are expected to be absolute URLs */ }
+  if (providerId === 'recordplus') return recordPlusProvider.isLoginUrl(navigatedUrl);
+  if (providerId === 'globoplay') return globoplayProvider.isLoginUrl(navigatedUrl);
   return false;
 }
 
-function attachProviderView({ providerId, url, channelUrl, channelName, mode = 'player' }) {
-  if (!mainWindow || !url) return { status: 'error', reason: 'missing-url' };
+function attachProviderView({ providerId, url, channelUrl, channelName, mode = 'player' } = {}) {
+  if (!mainWindow) return { status: 'error', reason: 'window-unavailable' };
+  const validation = validateProviderRequest({ providerId, url, channelUrl });
+  if (!validation.ok) {
+    console.warn(`[provider] blocked request for ${providerId || 'unknown'}: ${validation.reason}`);
+    return { status: 'error', reason: validation.reason };
+  }
 
   const isSameProvider = providerState?.providerId === providerId;
   if (!providerView || !isSameProvider) {
@@ -234,33 +197,46 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
     });
     mainWindow.contentView.addChildView(providerView);
     applyProviderBounds({ visible: false });
-    providerView.webContents.setWindowOpenHandler(() => {
-      return {
-        action: 'allow',
-        overrideBrowserWindowOptions: {
-          width: 480,
-          height: 720,
-          minWidth: 360,
-          minHeight: 520,
-          show: true,
-          parent: mainWindow,
-          modal: false,
-          backgroundColor: '#ffffff',
-          webPreferences: {
-            partition: `persist:${providerId}`,
-            preload: providerPreload,
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-          },
-        },
-      };
+    const createProviderWindowOptions = () => ({
+      width: 480,
+      height: 720,
+      minWidth: 360,
+      minHeight: 520,
+      show: true,
+      parent: mainWindow,
+      modal: false,
+      backgroundColor: '#ffffff',
+      webPreferences: {
+        partition: `persist:${providerId}`,
+        preload: providerPreload,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
     });
+    const denyUntrustedNavigation = (event, navigatedUrl) => {
+      if (isAllowedProviderUrl(providerId, navigatedUrl, { allowBlank: true })) return;
+      event.preventDefault();
+      console.warn(`[${providerId}] blocked navigation: ${navigatedUrl}`);
+    };
+    const allowProviderPopup = (details) => {
+      if (!isAllowedProviderUrl(providerId, details.url, { allowBlank: true })) {
+        console.warn(`[${providerId}] blocked popup: ${details.url}`);
+        return { action: 'deny' };
+      }
+      return { action: 'allow', overrideBrowserWindowOptions: createProviderWindowOptions() };
+    };
+    providerView.webContents.on('will-navigate', denyUntrustedNavigation);
+    providerView.webContents.on('will-redirect', denyUntrustedNavigation);
+    providerView.webContents.setWindowOpenHandler(allowProviderPopup);
     providerView.webContents.on('did-create-window', (childWindow, details) => {
       childWindow.setMenuBarVisibility(false);
       childWindow.show();
       childWindow.focus();
       console.log(`[${providerId}] OAuth window opened: ${details.url}`);
+      childWindow.webContents.on('will-navigate', denyUntrustedNavigation);
+      childWindow.webContents.on('will-redirect', denyUntrustedNavigation);
+      childWindow.webContents.setWindowOpenHandler(allowProviderPopup);
       childWindow.webContents.on('did-navigate', (_event, navigatedUrl) => {
         sendProviderState({ ...(providerState || {}), providerId, oauthUrl: navigatedUrl });
       });
@@ -354,6 +330,10 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
   return providerState;
 }
 
+function isAuthorizedRenderer(event) {
+  return Boolean(appView && !appView.webContents.isDestroyed() && event.sender === appView.webContents);
+}
+
 function waitForDevServer(url, attempts = 80) {
   return new Promise((resolve, reject) => {
     const check = (remaining) => {
@@ -443,16 +423,25 @@ async function createWindow() {
   await appView.webContents.loadURL(isDevelopment ? devServerUrl : `file://${path.join(projectRoot, 'dist', 'index.html')}`);
 }
 
-ipcMain.handle('provider:open', (_event, payload) => attachProviderView(payload));
-ipcMain.handle('provider:close', () => {
+ipcMain.handle('provider:open', (event, payload) => {
+  if (!isAuthorizedRenderer(event)) return { status: 'error', reason: 'unauthorized-sender' };
+  return attachProviderView(payload);
+});
+ipcMain.handle('provider:close', (event) => {
+  if (!isAuthorizedRenderer(event)) return { status: 'error', reason: 'unauthorized-sender' };
   return hideProviderView('app-request');
 });
-ipcMain.handle('provider:set-bounds', (_event, bounds) => {
+ipcMain.handle('provider:set-bounds', (event, bounds) => {
+  if (!isAuthorizedRenderer(event)) return { status: 'error', reason: 'unauthorized-sender' };
   applyProviderBounds(bounds);
   return lastProviderBounds;
 });
-ipcMain.handle('provider:set-layer', (_event, layer) => setProviderLayer(layer));
-ipcMain.handle('provider:set-audio-muted', (_event, muted) => {
+ipcMain.handle('provider:set-layer', (event, layer) => {
+  if (!isAuthorizedRenderer(event)) return false;
+  return setProviderLayer(layer);
+});
+ipcMain.handle('provider:set-audio-muted', (event, muted) => {
+  if (!isAuthorizedRenderer(event)) return false;
   if (!providerView || providerView.webContents.isDestroyed()) return false;
   providerView.webContents.setAudioMuted(Boolean(muted));
   return true;

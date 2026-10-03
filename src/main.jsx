@@ -1,4 +1,4 @@
-import React, { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Hls from 'hls.js';
 import {
@@ -1047,10 +1047,17 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, sho
   const isProvider = channel.playbackType === 'provider';
   const isEmbed = channel.playbackType === 'embed';
   const providerAccount = isProvider ? providerAccounts?.[channel.provider] : null;
+  const providerChannelUrl = isProvider ? channel.providerUrl || accountProviders[channel.provider]?.fallbackUrl : null;
+  const isCurrentProviderHandoff = isProvider
+    && providerHandoff?.providerId === channel.provider
+    && providerHandoff?.channelUrl === providerChannelUrl
+    && (!providerHandoff?.channelName || providerHandoff.channelName === channel.name);
+  const isOpenProviderHandoff = isCurrentProviderHandoff
+    && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff?.status);
   const providerNeedsLogin = isProvider
     && providerAccount?.status !== PROVIDER_STATUS.CONNECTED
     && !isWatching
-    && !['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff?.status);
+    && !isOpenProviderHandoff;
   const providerLabel = accountProviders[channel.provider]?.label || 'provedor';
   const externalProviderLabel = channel.externalProviderLabel || 'site oficial';
   const externalNotice = channel.authRequired
@@ -1793,7 +1800,8 @@ function App() {
   const providerPopupTimerRef = useRef(null);
   const providerPopupRef = useRef(null);
   const providerTargetRef = useRef(null);
-  const channels = getChannelsForRegion(region?.regionId || regionOptions[0].regionId);
+  const regionId = region?.regionId || regionOptions[0].regionId;
+  const channels = useMemo(() => getChannelsForRegion(regionId), [regionId]);
   const remote = useTvRemoteController({
     channels,
     isWatching,
