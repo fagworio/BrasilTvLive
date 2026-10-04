@@ -485,6 +485,7 @@ function getDesktopBridge() {
     isDesktop: true,
     openProviderSurface: (payload) => Promise.resolve(JSON.parse(nativeBridge.openProviderSurface(JSON.stringify(payload)) || '{}')),
     openProviderInBrowser: (payload) => Promise.resolve(JSON.parse(nativeBridge.openProviderInBrowser(JSON.stringify(payload)) || '{}')),
+    appReady: () => nativeBridge.appReady?.(),
     closeProviderSurface: () => nativeBridge.closeProviderSurface(),
     setProviderBounds: (bounds) => nativeBridge.setProviderBounds(JSON.stringify(bounds)),
     setProviderLayer: (layer) => nativeBridge.setProviderLayer(layer),
@@ -898,6 +899,9 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
   const shouldContinueInBrowser = isThisHandoff
     && providerHandoff?.sessionSurface === 'browser'
     && providerHandoff?.status === 'external-auth-returned-unverified';
+  const isBrowserOpening = isThisHandoff && ['browser-opening', 'browser-opened'].includes(providerHandoff?.status);
+  const isBrowserUnavailable = isThisHandoff && providerHandoff?.status === 'browser-unavailable';
+  const isBrowserFlowStatus = isBrowserOpening || isBrowserUnavailable;
   const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
   const canOpenLogin = Boolean(onOpenProviderLogin || onOpenAccounts);
 
@@ -938,7 +942,8 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
     return <div ref={surfaceRef} className={`provider-surface ${className || ''}`} aria-label={`${channel.name} — player oficial aberto`} />;
   }
 
-  const isDesktopLoginPreview = isDesktopProvider && !isConnected && !isWatching && !shouldContinueInBrowser;
+  const isDesktopLoginPreview = isDesktopProvider && !isConnected && !isWatching
+    && !shouldContinueInBrowser && !isBrowserFlowStatus;
   if (isDesktopLoginPreview) {
     // Navigation mode keeps the normal BrasilTvLive hero visible. The actual
     // provider login is opened only after Enter/select, when App switches to
@@ -971,6 +976,11 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: false, browser: true });
                 return;
               }
+              if (isBrowserUnavailable) {
+                onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: false, browser: true });
+                return;
+              }
+              if (isBrowserOpening) return;
               if (isThisHandoff && ['ready', 'player'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: true });
                 return;
@@ -980,7 +990,7 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : shouldContinueInBrowser ? 'Continuar no navegador' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            }} disabled={isBrowserOpening}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : shouldContinueInBrowser ? 'Continuar no navegador' : isBrowserOpening ? 'Navegador aberto' : isBrowserUnavailable ? 'Tentar abrir navegador' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             {(!isDesktopProvider || !isConnected) && <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no {provider.label}</a>}
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
@@ -996,6 +1006,12 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                   ? isDesktopProvider ? `O player oficial de ${provider.label} está aberto dentro do BrasilTvLive.` : `O player oficial de ${provider.label} foi aberto na mesma janela.`
               : providerHandoff.status === 'external-auth'
                 ? `O login de ${provider.label} está aberto no navegador seguro. Conclua a autenticação na página oficial e retorne ao BrasilTvLive.`
+              : providerHandoff.status === 'browser-opening'
+                ? `Abrindo ${channel.name} no navegador seguro…`
+              : providerHandoff.status === 'browser-opened'
+                ? `${channel.name} foi aberto no navegador seguro; a sessão continua fora do BrasilTvLive.`
+              : providerHandoff.status === 'browser-unavailable'
+                ? 'Não foi possível abrir um navegador compatível nesta TV. Instale ou atualize um navegador com suporte a Chrome Custom Tabs e tente novamente.'
               : providerHandoff.status === 'external-auth-returned-unverified'
                 ? `O navegador retornou. O BrasilTvLive não consegue confirmar o login externo; reabra ${channel.name} no navegador seguro para continuar.`
               : providerHandoff.status === 'auth-required'
@@ -1080,6 +1096,12 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
                 ? isDesktopSurface ? 'A superfície foi fechada. O BrasilTvLive mantém a sessão persistente para o próximo acesso.' : 'A janela foi fechada. O BrasilTvLive não consegue verificar o login externo.'
               : providerHandoff.status === 'external-auth'
                 ? `Conclua o login de ${provider.label} no navegador seguro. O BrasilTvLive não copia cookies nem credenciais.`
+              : providerHandoff.status === 'browser-opening'
+                ? 'Abrindo o navegador seguro…'
+              : providerHandoff.status === 'browser-opened'
+                ? `O navegador seguro foi aberto para ${provider.label}.`
+              : providerHandoff.status === 'browser-unavailable'
+                ? 'Não foi possível abrir um navegador compatível nesta TV. Instale ou atualize um navegador com suporte a Chrome Custom Tabs e tente novamente.'
               : providerHandoff.status === 'external-auth-returned-unverified'
                 ? `O navegador retornou, mas o login externo não foi verificado. Reabra o canal no navegador para continuar.`
                 : 'O popup foi bloqueado; use a nova aba para continuar.'}
@@ -2301,15 +2323,21 @@ function App() {
           channelUrl,
           channelName,
           mode: 'browser-player',
-          status: 'external-auth',
+          status: 'browser-opening',
           sessionSurface: 'browser',
           authVerified: false,
           surface: 'desktop',
         });
         desktop.openProviderInBrowser({ providerId, channelUrl, channelName })
-          .then((state) => setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
-            ? { ...current, ...state, sessionSurface: 'browser', authVerified: false, surface: 'desktop' }
-            : current))
+          .then((state) => {
+            // Android reports the actual browser result asynchronously on
+            // provider-state. The bridge response only acknowledges receipt.
+            if (state?.status !== 'requested') {
+              setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
+                ? { ...current, ...state, sessionSurface: 'browser', authVerified: false, surface: 'desktop' }
+                : current);
+            }
+          })
           .catch(() => setProviderHandoff((current) => current?.providerId === providerId
             ? { ...current, status: 'error', surface: 'desktop' }
             : current));
@@ -2671,7 +2699,7 @@ function App() {
   useEffect(() => {
     const desktop = getDesktopBridge();
     if (!desktop?.onProviderState) return undefined;
-    return desktop.onProviderState((event) => {
+    const unsubscribe = desktop.onProviderState((event) => {
       if (event?.type === 'channel-step') {
         stepChannel(event.direction);
         return;
@@ -2729,9 +2757,9 @@ function App() {
           remote.selectProgram(requestedChannelIndex, 0);
         }
       }
-      const isVerifiedAndroidWebViewPlayer = !window.AndroidBrasilTvLive
-        || (stateEvent.sessionSurface === 'webview' && stateEvent.authVerified === true);
-      if (stateEvent.status === 'player' && isVerifiedAndroidWebViewPlayer) {
+      const isStableAndroidWebViewPlayer = !window.AndroidBrasilTvLive
+        || (stateEvent.sessionSurface === 'webview' && stateEvent.playerRouteStable === true);
+      if (stateEvent.status === 'player' && isStableAndroidWebViewPlayer) {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,
@@ -2783,6 +2811,10 @@ function App() {
         surface: 'desktop',
       }));
     });
+    // The listener is active before this handshake, so a restored Activity
+    // cannot lose a pending browser-auth return while React is still mounting.
+    desktop.appReady?.();
+    return unsubscribe;
   }, [activeChannelIndex, channels, isMobile, providerAccounts, region?.regionId]);
 
   useEffect(() => {
