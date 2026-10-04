@@ -967,12 +967,12 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: true });
                 return;
               }
-              if (isThisHandoff && ['open', 'loading', 'external-auth', 'external-auth-returned'].includes(providerHandoff.status)) {
+              if (isThisHandoff && ['open', 'loading', 'external-auth', 'external-auth-returned-unverified'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name });
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth', 'external-auth-returned'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth', 'external-auth-returned-unverified'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             {(!isDesktopProvider || !isConnected) && <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no {provider.label}</a>}
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
@@ -986,8 +986,10 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 ? isDesktopProvider ? 'A superfície foi fechada. Abra o canal novamente para continuar com a sessão persistente.' : 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
               : providerHandoff.status === 'player'
                   ? isDesktopProvider ? `O player oficial de ${provider.label} está aberto dentro do BrasilTvLive.` : `O player oficial de ${provider.label} foi aberto na mesma janela.`
-              : ['external-auth', 'external-auth-returned'].includes(providerHandoff.status)
+              : providerHandoff.status === 'external-auth'
                 ? `O login de ${provider.label} está aberto no navegador seguro. Conclua a autenticação na página oficial e retorne ao BrasilTvLive.`
+              : providerHandoff.status === 'external-auth-returned-unverified'
+                ? `O navegador retornou. O BrasilTvLive não consegue confirmar o login externo; reabra ${channel.name} no navegador seguro para continuar.`
               : providerHandoff.status === 'auth-required'
                 ? `${provider.label} solicitou login nesta sessão. Conclua a autenticação para abrir o canal escolhido.`
                   : isDesktopProvider ? 'Não foi possível carregar o player oficial. Tente abrir o canal novamente.' : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
@@ -1058,7 +1060,7 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
           <strong>{isDesktopSurface ? `Login de ${provider.label} dentro do app` : `Login de ${provider.label} no navegador`}</strong>
           <span>{isDesktopSurface ? `A página oficial será carregada dentro do BrasilTvLive. A sessão de ${provider.label} fica persistente no desktop e não é copiada para o app.` : `O login será aberto em uma janela própria. Depois de concluir, volte para o BrasilTvLive e abra o canal oficial.`}</span>
           {onOpenProviderLogin && <button ref={actionButtonRef} type="button" onClick={() => onOpenProviderLogin({ providerId })}>
-            {providerHandoff?.providerId === providerId && ['open', 'loading', 'external-auth', 'external-auth-returned'].includes(providerHandoff.status) ? (isDesktopSurface ? 'Login aberto no app' : 'Login aberto') : (isDesktopSurface ? 'Abrir login no app' : 'Abrir login em janela')}
+            {providerHandoff?.providerId === providerId && ['open', 'loading', 'external-auth', 'external-auth-returned-unverified'].includes(providerHandoff.status) ? (isDesktopSurface ? 'Login aberto no app' : 'Login aberto') : (isDesktopSurface ? 'Abrir login no app' : 'Abrir login em janela')}
           </button>}
           {!isDesktopSurface && <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir login em nova aba</a>}
           {providerHandoff?.providerId === providerId && <small role="status" aria-live="polite">
@@ -1068,8 +1070,10 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
                 ? 'Carregando a superfície oficial…'
               : providerHandoff.status === 'closed'
                 ? isDesktopSurface ? 'A superfície foi fechada. O BrasilTvLive mantém a sessão persistente para o próximo acesso.' : 'A janela foi fechada. O BrasilTvLive não consegue verificar o login externo.'
-              : ['external-auth', 'external-auth-returned'].includes(providerHandoff.status)
+              : providerHandoff.status === 'external-auth'
                 ? `Conclua o login de ${provider.label} no navegador seguro. O BrasilTvLive não copia cookies nem credenciais.`
+              : providerHandoff.status === 'external-auth-returned-unverified'
+                ? `O navegador retornou, mas o login externo não foi verificado. Reabra o canal no navegador para continuar.`
                 : 'O popup foi bloqueado; use a nova aba para continuar.'}
           </small>}
         </div> : surfaceState === 'blocked' ? <div className="provider-login-blocked" role="alert">

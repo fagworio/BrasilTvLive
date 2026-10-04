@@ -68,13 +68,56 @@ public final class MainActivity extends Activity {
     private boolean providerVisible;
     private boolean providerPlayerOpened;
     private boolean providerCompatibilitySurface;
-    private String pendingExternalAuthUrl;
+    private PendingExternalAuth pendingExternalAuth;
     private String pendingGeolocationOrigin;
     private GeolocationPermissions.Callback pendingGeolocationCallback;
+
+    private static final class PendingExternalAuth {
+        final String requestId;
+        final String providerId;
+        final String channelUrl;
+        final String channelName;
+        final String url;
+        final String authSurface;
+        final long startedAt;
+
+        PendingExternalAuth(JSONObject state, String url, String authSurface) {
+            this.requestId = state == null ? "" : state.optString("requestId", "");
+            this.providerId = state == null ? "" : state.optString("providerId", "");
+            this.channelUrl = state == null ? "" : state.optString("channelUrl", "");
+            this.channelName = state == null ? "" : state.optString("channelName", "");
+            this.url = url == null ? "" : url;
+            this.authSurface = authSurface == null ? "secure-browser" : authSurface;
+            this.startedAt = System.currentTimeMillis();
+        }
+
+        PendingExternalAuth(Bundle state) {
+            this.requestId = state.getString("auth.requestId", "");
+            this.providerId = state.getString("auth.providerId", "");
+            this.channelUrl = state.getString("auth.channelUrl", "");
+            this.channelName = state.getString("auth.channelName", "");
+            this.url = state.getString("auth.url", "");
+            this.authSurface = state.getString("auth.surface", "secure-browser");
+            this.startedAt = state.getLong("auth.startedAt", System.currentTimeMillis());
+        }
+
+        void save(Bundle state) {
+            state.putString("auth.requestId", requestId);
+            state.putString("auth.providerId", providerId);
+            state.putString("auth.channelUrl", channelUrl);
+            state.putString("auth.channelName", channelName);
+            state.putString("auth.url", url);
+            state.putString("auth.surface", authSurface);
+            state.putLong("auth.startedAt", startedAt);
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null && savedInstanceState.getBoolean("auth.pending", false)) {
+            pendingExternalAuth = new PendingExternalAuth(savedInstanceState);
+        }
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -83,6 +126,15 @@ public final class MainActivity extends Activity {
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
         buildApplicationSurface();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        if (pendingExternalAuth != null) {
+            outState.putBoolean("auth.pending", true);
+            pendingExternalAuth.save(outState);
+        }
+        super.onSaveInstanceState(outState);
     }
 
     private void buildApplicationSurface() {
@@ -195,7 +247,6 @@ public final class MainActivity extends Activity {
                         + " Chrome/120.0.0.0 Safari/537.36");
             }
         }
-        view.addJavascriptInterface(new ProviderBridge(), "AndroidBrasilTvLive");
         view.setWebViewClient(new ProviderWebViewClient());
         view.setWebChromeClient(new ProviderChromeClient());
         view.setBackgroundColor(Color.BLACK);
@@ -252,6 +303,9 @@ public final class MainActivity extends Activity {
             providerState.put("mode", mode);
             providerState.put("status", providerPlayerOpened ? "player" : "open");
             providerState.put("requestId", System.currentTimeMillis());
+            providerState.put("authState", providerPlayerOpened ? "unknown" : "anonymous");
+            providerState.put("sessionSurface", "webview");
+            providerState.put("authVerified", false);
             sendProviderState(providerState);
             // Android TV login must use the deterministic TV form. Provider
             // login SPAs can remain on an endless loader even when the TV has
@@ -262,6 +316,7 @@ public final class MainActivity extends Activity {
                     || (isTelevisionDevice() && "login".equals(mode));
             if (providerCompatibilitySurface) {
                 Log.w(TAG, "Legacy Android WebView detected; using provider compatibility surface for " + providerId);
+                providerWebView.addJavascriptInterface(new ProviderBridge(), "AndroidBrasilTvLive");
                 providerWebView.loadDataWithBaseURL(
                         providerId.equals("globoplay") ? "https://globoplay.globo.com" : "https://www.recordplus.com",
                         buildProviderCompatibilityHtml(providerId, channelName, url),
@@ -294,7 +349,13 @@ public final class MainActivity extends Activity {
      */
     private void openProviderInsideWebView(String url) {
         if (providerWebView == null || providerState == null || url == null || url.isEmpty()) return;
-        pendingExternalAuthUrl = null;
+        if (!isAllowedProviderUrl(providerState.optString("providerId", ""), Uri.parse(url), false)) {
+            Log.w(TAG, "Refusing to open untrusted internal provider URL: " + url);
+            showProviderBrowserUnavailable("login oficial");
+            return;
+        }
+        pendingExternalAuth = null;
+        providerWebView.removeJavascriptInterface("AndroidBrasilTvLive");
         providerCompatibilitySurface = false;
         providerPlayerOpened = false;
         providerVisible = true;
@@ -302,6 +363,9 @@ public final class MainActivity extends Activity {
         try {
             providerState.put("status", "loading");
             providerState.put("authSurface", "webview");
+            providerState.put("authState", "anonymous");
+            providerState.put("sessionSurface", "webview");
+            providerState.put("authVerified", false);
             sendProviderState(providerState);
         } catch (JSONException exception) {
             Log.w(TAG, "Could not update provider WebView state", exception);
@@ -346,6 +410,22 @@ public final class MainActivity extends Activity {
         String script = "window.dispatchEvent(new CustomEvent('brasiltvlive-provider-state',{detail:"
                 + state.toString() + "}));";
         appWebView.evaluateJavascript(script, null);
+    }
+
+    private void markExternalAuthReturnedUnverified() {
+        if (pendingExternalAuth == null || providerState == null) return;
+        PendingExternalAuth returnedAuth = pendingExternalAuth;
+        pendingExternalAuth = null;
+        try {
+            providerState.put("status", "external-auth-returned-unverified");
+            providerState.put("authState", "external-returned-unverified");
+            providerState.put("sessionSurface", "browser");
+            providerState.put("authVerified", false);
+            providerState.put("authRequestId", returnedAuth.requestId);
+            sendProviderState(providerState);
+        } catch (JSONException exception) {
+            Log.w(TAG, "Could not report return from provider auth", exception);
+        }
     }
 
     private void openNativeLiveStream(String url) {
@@ -486,7 +566,27 @@ public final class MainActivity extends Activity {
         if (host == null) return false;
         return isGoogleAuthUrl(uri)
                 || "appleid.apple.com".equalsIgnoreCase(host)
-                || host.endsWith(".appleid.apple.com");
+                || host.endsWith(".appleid.apple.com")
+                || "facebook.com".equalsIgnoreCase(host)
+                || host.endsWith(".facebook.com");
+    }
+
+    private boolean isAllowedProviderUrl(String providerId, Uri uri, boolean external) {
+        if (providerId == null || providerId.trim().isEmpty()) return false;
+        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
+        String host = uri.getHost();
+        if (host == null) return false;
+        host = host.toLowerCase(java.util.Locale.ROOT);
+
+        if ("recordplus".equals(providerId)) {
+            if (host.equals("recordplus.com") || host.endsWith(".recordplus.com")) return true;
+        }
+        if ("globoplay".equals(providerId)) {
+            if (host.equals("globoplay.globo.com")
+                    || host.equals("login.globo.com")
+                    || host.equals("conta.globo.com")) return true;
+        }
+        return external && isSocialAuthUrl(uri);
     }
 
     private boolean openProviderInCustomTab(Uri uri) {
@@ -497,7 +597,6 @@ public final class MainActivity extends Activity {
                     .setShowTitle(true)
                     .build();
             customTabs.intent.setPackage(customTabsPackage);
-            customTabs.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             customTabs.launchUrl(this, uri);
             return true;
         } catch (ActivityNotFoundException | SecurityException exception) {
@@ -522,29 +621,38 @@ public final class MainActivity extends Activity {
             return;
         }
 
-        pendingExternalAuthUrl = uri.toString();
+        String providerId = providerState == null ? "" : providerState.optString("providerId", "");
+        if (!isAllowedProviderUrl(providerId, uri, true)) {
+            Log.w(TAG, "Refusing to open untrusted external provider URL: " + uri);
+            showProviderBrowserUnavailable(flowLabel);
+            return;
+        }
+
         try {
             boolean openedInCustomTab = openProviderInCustomTab(uri);
             if (!openedInCustomTab) {
                 Intent intent = new Intent(Intent.ACTION_VIEW, uri);
                 intent.addCategory(Intent.CATEGORY_BROWSABLE);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 if (getPackageManager().resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) {
                     Log.w(TAG, "No browser available for provider auth: " + uri);
-                    pendingExternalAuthUrl = null;
                     showProviderBrowserUnavailable(flowLabel);
                     return;
                 }
                 startActivity(intent);
             }
+            pendingExternalAuth = new PendingExternalAuth(
+                    providerState, uri.toString(), openedInCustomTab ? "custom-tab" : "secure-browser");
             if (providerState != null) {
                 providerState.put("status", "external-auth");
                 providerState.put("authSurface", openedInCustomTab ? "custom-tab" : "secure-browser");
+                providerState.put("authState", "external-pending");
+                providerState.put("sessionSurface", "browser");
+                providerState.put("authVerified", false);
                 sendProviderState(providerState);
             }
         } catch (ActivityNotFoundException | SecurityException exception) {
             Log.w(TAG, "Could not open secure provider auth surface", exception);
-            pendingExternalAuthUrl = null;
+            pendingExternalAuth = null;
             showProviderBrowserUnavailable(flowLabel);
         } catch (JSONException exception) {
             Log.w(TAG, "Could not update provider auth state", exception);
@@ -565,12 +673,20 @@ public final class MainActivity extends Activity {
     private final class ProviderBridge {
         @JavascriptInterface
         public void openProviderInternal(String url) {
-            runOnUiThread(() -> openProviderInsideWebView(url));
+            runOnUiThread(() -> {
+                if (url == null || url.trim().isEmpty()) return;
+                if (hasLegacyProviderWebView()) {
+                    openProviderInSecureBrowser(Uri.parse(url), "login oficial");
+                } else {
+                    openProviderInsideWebView(url);
+                }
+            });
         }
 
         @JavascriptInterface
         public void openProviderExternal(String url) {
             runOnUiThread(() -> {
+                if (url == null || url.trim().isEmpty()) return;
                 openProviderInSecureBrowser(Uri.parse(url), "login oficial");
             });
         }
@@ -585,7 +701,8 @@ public final class MainActivity extends Activity {
         String provider = "globoplay".equals(providerId) ? "Globo" : "Record+";
         String brand = "globoplay".equals(providerId) ? "globoplay" : "recordplus";
         String escapedProviderUrl = escapeHtml(providerUrl);
-        String socialNote = "O login social abre a página oficial do provedor para concluir a autenticação.";
+        String socialNote = "O login social abre a página oficial do provedor para concluir a autenticação. "
+                + "O BrasilTvLive não coleta e não envia suas credenciais.";
         String providerNotice = "A página oficial usa recursos que não existem no Android System WebView desta TV. "
                 + "A interface abaixo mantém o fluxo navegável; o login social será concluído no navegador oficial.";
         StringBuilder html = new StringBuilder();
@@ -601,16 +718,15 @@ public final class MainActivity extends Activity {
                 .append("<h1 class='title'>").append("globoplay".equals(providerId) ? "Conta Globo" : "Entre na sua conta").append("</h1>")
                 .append("<p class='subtitle'>Conclua o login para abrir ").append(escapeHtml(channelName)).append(".</p>");
         if ("globoplay".equals(providerId)) {
-            html.append("<div class='field'><label for='email'>Informe o seu e-mail</label><input id='email' type='email' placeholder='Ex: @gmail, @outlook, @yahoo, etc.'></div>")
-                    .append("<button class='primary' onclick=\"openOfficial('password')\">Continuar</button>")
-                    .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou escolha uma opção:</p>")
-                    .append("<div class='socials'><button class='social' onclick=\"openOfficial('social')\">G&nbsp;&nbsp; Google</button><button class='social' onclick=\"openOfficial('social')\">f&nbsp;&nbsp; Facebook</button></div>")
+            html.append("<p class='subtitle'>A autenticação acontece somente na página oficial da Conta Globo.</p>")
+                    .append("<button class='primary' onclick=\"openOfficial('password')\">Abrir login oficial</button>")
+                    .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou escolha uma opção na página oficial:</p>")
+                    .append("<div class='socials'><button class='social' onclick=\"openOfficial('social')\">G&nbsp;&nbsp; Continuar com Google</button><button class='social' onclick=\"openOfficial('social')\">f&nbsp;&nbsp; Continuar com Facebook</button></div>")
                     .append("<div class='globo-card'><h2>Por que ter uma Conta Globo?</h2><p>✓ A Conta Globo é gratuita, basta se cadastrar e acessar.</p><p>✓ Use o mesmo login para todos os produtos Globo e parceiros.</p></div>");
         } else {
-            html.append("<div class='field'><label for='email'>E-mail</label><input id='email' type='email' placeholder='Endereço de e-mail'></div>")
-                    .append("<div class='field'><label for='password'>Senha</label><input id='password' type='password' placeholder='Senha'></div>")
-                    .append("<label class='remember'><input type='checkbox'>Lembrar meu usuário</label>")
-                    .append("<button class='primary' onclick=\"openOfficial('password')\">Entrar</button><a class='reset' href='#' onclick=\"openOfficial('password');return false\">Redefinir senha</a>")
+            html.append("<p class='subtitle'>Escolha uma opção para abrir o login oficial do RecordPlus. Os campos de e-mail e senha serão exibidos pelo próprio provedor.</p>")
+                    .append("<button class='primary' onclick=\"openOfficial('password')\">Abrir login oficial</button>")
+                    .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou abra o login social oficial:</p>")
                     .append("<div class='socials'><button class='social' onclick=\"openOfficial('social')\">G&nbsp;&nbsp; Continuar com Google</button><button class='social' onclick=\"openOfficial('social')\">●&nbsp;&nbsp; Continuar com Apple</button></div>");
         }
         html.append("<div class='notice'><strong>Login oficial ").append(provider).append("</strong>").append(providerNotice).append("<br><br>").append(socialNote).append("</div>")
@@ -905,14 +1021,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (pendingExternalAuthUrl == null || providerState == null) return;
-        pendingExternalAuthUrl = null;
-        try {
-            providerState.put("status", "external-auth-returned");
-            sendProviderState(providerState);
-        } catch (JSONException exception) {
-            Log.w(TAG, "Could not report return from provider auth", exception);
-        }
+        markExternalAuthReturnedUnverified();
     }
 
     @Override
@@ -1000,6 +1109,7 @@ public final class MainActivity extends Activity {
             view.postDelayed(() -> view.evaluateJavascript(
                     "window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;",
                     null), 220);
+            markExternalAuthReturnedUnverified();
             super.onPageFinished(view, url);
         }
     }
@@ -1007,6 +1117,11 @@ public final class MainActivity extends Activity {
     private final class ProviderWebViewClient extends WebViewClient {
         @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
+            String providerId = providerState == null ? "" : providerState.optString("providerId", "");
+            if (!isAllowedProviderUrl(providerId, uri, true)) {
+                Log.w(TAG, "Blocking untrusted provider navigation: " + uri);
+                return true;
+            }
             if (isSocialAuthUrl(uri)) {
                 openProviderInSecureBrowser(uri, "login social");
                 return true;
@@ -1016,6 +1131,11 @@ public final class MainActivity extends Activity {
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView view, String url) {
             Uri uri = Uri.parse(url);
+            String providerId = providerState == null ? "" : providerState.optString("providerId", "");
+            if (!isAllowedProviderUrl(providerId, uri, true)) {
+                Log.w(TAG, "Blocking untrusted provider navigation: " + uri);
+                return true;
+            }
             if (isSocialAuthUrl(uri)) {
                 openProviderInSecureBrowser(uri, "login social");
                 return true;
