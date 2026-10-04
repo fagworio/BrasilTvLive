@@ -484,6 +484,7 @@ function getDesktopBridge() {
   const bridge = {
     isDesktop: true,
     openProviderSurface: (payload) => Promise.resolve(JSON.parse(nativeBridge.openProviderSurface(JSON.stringify(payload)) || '{}')),
+    openProviderInBrowser: (payload) => Promise.resolve(JSON.parse(nativeBridge.openProviderInBrowser(JSON.stringify(payload)) || '{}')),
     closeProviderSurface: () => nativeBridge.closeProviderSurface(),
     setProviderBounds: (bounds) => nativeBridge.setProviderBounds(JSON.stringify(bounds)),
     setProviderLayer: (layer) => nativeBridge.setProviderLayer(layer),
@@ -894,6 +895,9 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
   const isThisHandoff = providerHandoff?.providerId === channel.provider
     && providerHandoff?.channelUrl === channelUrl
     && (!providerHandoff?.channelName || providerHandoff.channelName === channel.name);
+  const shouldContinueInBrowser = isThisHandoff
+    && providerHandoff?.sessionSurface === 'browser'
+    && providerHandoff?.status === 'external-auth-returned-unverified';
   const desktopSurfaceOpen = isDesktopProvider && isThisHandoff && ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
   const canOpenLogin = Boolean(onOpenProviderLogin || onOpenAccounts);
 
@@ -934,7 +938,7 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
     return <div ref={surfaceRef} className={`provider-surface ${className || ''}`} aria-label={`${channel.name} — player oficial aberto`} />;
   }
 
-  const isDesktopLoginPreview = isDesktopProvider && !isConnected && !isWatching;
+  const isDesktopLoginPreview = isDesktopProvider && !isConnected && !isWatching && !shouldContinueInBrowser;
   if (isDesktopLoginPreview) {
     // Navigation mode keeps the normal BrasilTvLive hero visible. The actual
     // provider login is opened only after Enter/select, when App switches to
@@ -963,6 +967,10 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 onOpenAccounts?.();
                 return;
               }
+              if (shouldContinueInBrowser) {
+                onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: false, browser: true });
+                return;
+              }
               if (isThisHandoff && ['ready', 'player'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: true });
                 return;
@@ -972,7 +980,7 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth', 'external-auth-returned-unverified'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : shouldContinueInBrowser ? 'Continuar no navegador' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             {(!isDesktopProvider || !isConnected) && <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no {provider.label}</a>}
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
@@ -2282,13 +2290,35 @@ function App() {
     }, 700);
   };
 
-  const openProviderChannel = ({ providerId, channelUrl, channelName, watch = true }) => {
+  const openProviderChannel = ({ providerId, channelUrl, channelName, watch = true, browser = false }) => {
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
+      if (browser && desktop.openProviderInBrowser) {
+        setIsWatching(false);
+        providerTargetRef.current = { providerId, channelUrl, channelName };
+        setProviderHandoff({
+          providerId,
+          channelUrl,
+          channelName,
+          mode: 'browser-player',
+          status: 'external-auth',
+          sessionSurface: 'browser',
+          authVerified: false,
+          surface: 'desktop',
+        });
+        desktop.openProviderInBrowser({ providerId, channelUrl, channelName })
+          .then((state) => setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
+            ? { ...current, ...state, sessionSurface: 'browser', authVerified: false, surface: 'desktop' }
+            : current))
+          .catch(() => setProviderHandoff((current) => current?.providerId === providerId
+            ? { ...current, status: 'error', surface: 'desktop' }
+            : current));
+        return;
+      }
       setIsWatching(watch);
       providerTargetRef.current = { providerId, channelUrl, channelName };
       const mode = watch ? 'watch' : 'preview';
-      const nextHandoff = { providerId, channelUrl, channelName, mode, status: watch ? 'player' : 'loading', surface: 'desktop' };
+      const nextHandoff = { providerId, channelUrl, channelName, mode, status: 'loading', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
       desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName, mode })
         .then((state) => setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
@@ -2488,6 +2518,15 @@ function App() {
       setShowChannelNotice(false);
       const provider = accountProviders[selectedChannel.provider];
       const channelUrl = selectedChannel.providerUrl || provider?.fallbackUrl;
+      const canContinueInBrowser = providerHandoffRef.current?.providerId === selectedChannel.provider
+        && providerHandoffRef.current?.channelUrl === channelUrl
+        && providerHandoffRef.current?.sessionSurface === 'browser'
+        && providerHandoffRef.current?.status === 'external-auth-returned-unverified';
+      if (canContinueInBrowser) {
+        setIsWatching(false);
+        openProviderChannel({ providerId: selectedChannel.provider, channelUrl, channelName: selectedChannel.name, watch: false, browser: true });
+        return;
+      }
       const isConnected = providerAccounts[selectedChannel.provider]?.status === PROVIDER_STATUS.CONNECTED;
       if (isConnected) {
         setIsWatching(true);
@@ -2639,6 +2678,26 @@ function App() {
       }
       if (!event?.providerId) return;
       const providerTarget = providerTargetRef.current;
+      const isRestoredBrowserReturn = event.status === 'external-auth-returned-unverified'
+        && event.sessionSurface === 'browser'
+        && !providerTarget;
+      if (isRestoredBrowserReturn) {
+        providerTargetRef.current = {
+          providerId: event.providerId,
+          channelUrl: event.channelUrl,
+          channelName: event.channelName,
+          requestId: event.requestId,
+        };
+        const requestedChannelIndex = channels.findIndex((channel) => channel.provider === event.providerId
+          && (event.channelName ? channel.name === event.channelName : channel.providerUrl === event.channelUrl));
+        if (requestedChannelIndex >= 0) {
+          setActiveChannelIndex(requestedChannelIndex);
+          remote.selectProgram(requestedChannelIndex, 0);
+        }
+        setIsWatching(false);
+        setProviderHandoff({ ...event, surface: 'desktop' });
+        return;
+      }
       const isProviderBack = (event.status === 'closed' || event.reason === 'back')
         && (isCurrentProviderTarget(event, providerTarget)
           || providerHandoffRef.current?.providerId === event.providerId);
@@ -2670,7 +2729,9 @@ function App() {
           remote.selectProgram(requestedChannelIndex, 0);
         }
       }
-      if (stateEvent.status === 'player') {
+      const isVerifiedAndroidWebViewPlayer = !window.AndroidBrasilTvLive
+        || (stateEvent.sessionSurface === 'webview' && stateEvent.authVerified === true);
+      if (stateEvent.status === 'player' && isVerifiedAndroidWebViewPlayer) {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,

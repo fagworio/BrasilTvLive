@@ -52,6 +52,8 @@ public final class MainActivity extends Activity {
     private static final String TAG = "BrasilTvLiveAndroid";
     private static final String APP_ASSET_URL =
             "https://appassets.androidplatform.net/assets/web/index.html";
+    private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
+    private static final long EXTERNAL_AUTH_TTL_MS = 15 * 60 * 1000L;
 
     private FrameLayout root;
     private WebView appWebView;
@@ -65,6 +67,7 @@ public final class MainActivity extends Activity {
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
     private JSONObject providerState;
+    private boolean appShellReady;
     private boolean providerVisible;
     private boolean providerPlayerOpened;
     private boolean providerCompatibilitySurface;
@@ -79,6 +82,7 @@ public final class MainActivity extends Activity {
         final String channelName;
         final String url;
         final String authSurface;
+        final String mode;
         final long startedAt;
 
         PendingExternalAuth(JSONObject state, String url, String authSurface) {
@@ -88,6 +92,7 @@ public final class MainActivity extends Activity {
             this.channelName = state == null ? "" : state.optString("channelName", "");
             this.url = url == null ? "" : url;
             this.authSurface = authSurface == null ? "secure-browser" : authSurface;
+            this.mode = state == null ? "login" : state.optString("mode", "login");
             this.startedAt = System.currentTimeMillis();
         }
 
@@ -98,6 +103,7 @@ public final class MainActivity extends Activity {
             this.channelName = state.getString("auth.channelName", "");
             this.url = state.getString("auth.url", "");
             this.authSurface = state.getString("auth.surface", "secure-browser");
+            this.mode = state.getString("auth.mode", "login");
             this.startedAt = state.getLong("auth.startedAt", System.currentTimeMillis());
         }
 
@@ -108,6 +114,7 @@ public final class MainActivity extends Activity {
             state.putString("auth.channelName", channelName);
             state.putString("auth.url", url);
             state.putString("auth.surface", authSurface);
+            state.putString("auth.mode", mode);
             state.putLong("auth.startedAt", startedAt);
         }
     }
@@ -272,15 +279,27 @@ public final class MainActivity extends Activity {
                 == Configuration.UI_MODE_TYPE_TELEVISION;
     }
 
+    private boolean isAppShellUrl(Uri uri) {
+        return uri != null
+                && "https".equalsIgnoreCase(uri.getScheme())
+                && APP_ASSET_HOST.equalsIgnoreCase(uri.getHost());
+    }
+
     private void openProvider(String payload) {
         try {
             JSONObject request = new JSONObject(payload);
             String providerId = request.optString("providerId", "");
             String url = request.optString("url", "");
-            String channelUrl = request.optString("channelUrl", url);
+            String channelUrl = request.optString("channelUrl", "");
             String channelName = request.optString("channelName", "");
             String mode = request.optString("mode", "login");
-            if (providerId.isEmpty() || url.isEmpty()) return;
+            if (channelUrl.isEmpty()) channelUrl = url;
+            if (providerId.isEmpty() || url.isEmpty()
+                    || !isAllowedProviderUrl(providerId, Uri.parse(url), false)
+                    || !isAllowedProviderUrl(providerId, Uri.parse(channelUrl), false)) {
+                Log.w(TAG, "Refusing invalid provider request for " + providerId);
+                return;
+            }
 
             closeCustomView();
             if (providerWebView != null) {
@@ -294,14 +313,15 @@ public final class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT));
             providerVisible = !"preview".equals(mode);
             providerWebView.setVisibility(providerVisible ? View.VISIBLE : View.GONE);
-            providerPlayerOpened = "watch".equals(mode) || "player".equals(mode);
+            providerPlayerOpened = false;
 
             providerState = new JSONObject();
             providerState.put("providerId", providerId);
             providerState.put("channelUrl", channelUrl);
             providerState.put("channelName", channelName);
             providerState.put("mode", mode);
-            providerState.put("status", providerPlayerOpened ? "player" : "open");
+            providerState.put("status", ("watch".equals(mode) || "player".equals(mode))
+                    ? "loading" : "open");
             providerState.put("requestId", System.currentTimeMillis());
             providerState.put("authState", providerPlayerOpened ? "unknown" : "anonymous");
             providerState.put("sessionSurface", "webview");
@@ -338,6 +358,39 @@ public final class MainActivity extends Activity {
         try {
             return providerState == null ? "{}" : providerState.toString();
         } catch (RuntimeException exception) {
+            return "{}";
+        }
+    }
+
+    private String openProviderInBrowserAndReturn(String payload) {
+        try {
+            JSONObject request = new JSONObject(payload);
+            String providerId = request.optString("providerId", "");
+            String channelUrl = request.optString("channelUrl", "");
+            String channelName = request.optString("channelName", "");
+            if (providerId.isEmpty() || channelUrl.isEmpty()
+                    || !isAllowedProviderUrl(providerId, Uri.parse(channelUrl), true)) {
+                Log.w(TAG, "Refusing invalid browser player request for " + providerId);
+                return "{}";
+            }
+
+            providerVisible = false;
+            if (providerWebView != null) providerWebView.setVisibility(View.GONE);
+            appWebView.requestFocus(View.FOCUS_FORWARD);
+            providerState = new JSONObject();
+            providerState.put("providerId", providerId);
+            providerState.put("channelUrl", channelUrl);
+            providerState.put("channelName", channelName);
+            providerState.put("mode", "browser-player");
+            providerState.put("status", "loading");
+            providerState.put("requestId", System.currentTimeMillis());
+            providerState.put("authState", "external-pending");
+            providerState.put("sessionSurface", "browser");
+            providerState.put("authVerified", false);
+            openProviderInSecureBrowser(Uri.parse(channelUrl), "player oficial");
+            return providerState.toString();
+        } catch (JSONException exception) {
+            Log.w(TAG, "Invalid browser player request", exception);
             return "{}";
         }
     }
@@ -413,8 +466,34 @@ public final class MainActivity extends Activity {
     }
 
     private void markExternalAuthReturnedUnverified() {
-        if (pendingExternalAuth == null || providerState == null) return;
+        if (pendingExternalAuth == null || !appShellReady) return;
+        if (System.currentTimeMillis() - pendingExternalAuth.startedAt > EXTERNAL_AUTH_TTL_MS) {
+            Log.w(TAG, "Discarding expired external auth handoff");
+            pendingExternalAuth = null;
+            return;
+        }
+        if (providerState == null) {
+            providerState = new JSONObject();
+            try {
+                providerState.put("providerId", pendingExternalAuth.providerId);
+                providerState.put("channelUrl", pendingExternalAuth.channelUrl);
+                providerState.put("channelName", pendingExternalAuth.channelName);
+                providerState.put("mode", pendingExternalAuth.mode);
+                providerState.put("requestId", pendingExternalAuth.requestId);
+            } catch (JSONException exception) {
+                Log.w(TAG, "Could not restore external auth handoff", exception);
+                pendingExternalAuth = null;
+                return;
+            }
+        }
         PendingExternalAuth returnedAuth = pendingExternalAuth;
+        if (!returnedAuth.providerId.equals(providerState.optString("providerId", ""))
+                || !returnedAuth.channelUrl.equals(providerState.optString("channelUrl", ""))
+                || !returnedAuth.requestId.equals(providerState.optString("requestId", ""))) {
+            Log.w(TAG, "Discarding stale external auth return");
+            pendingExternalAuth = null;
+            return;
+        }
         pendingExternalAuth = null;
         try {
             providerState.put("status", "external-auth-returned-unverified");
@@ -571,6 +650,23 @@ public final class MainActivity extends Activity {
                 || host.endsWith(".facebook.com");
     }
 
+    private boolean isAllowedSocialAuthUrl(String providerId, Uri uri) {
+        String host = uri == null ? null : uri.getHost();
+        if (host == null) return false;
+        host = host.toLowerCase(java.util.Locale.ROOT);
+        if ("recordplus".equals(providerId)) {
+            return isGoogleAuthUrl(uri)
+                    || "appleid.apple.com".equals(host)
+                    || host.endsWith(".appleid.apple.com");
+        }
+        if ("globoplay".equals(providerId)) {
+            return isGoogleAuthUrl(uri)
+                    || "facebook.com".equals(host)
+                    || host.endsWith(".facebook.com");
+        }
+        return false;
+    }
+
     private boolean isAllowedProviderUrl(String providerId, Uri uri, boolean external) {
         if (providerId == null || providerId.trim().isEmpty()) return false;
         if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
@@ -586,7 +682,7 @@ public final class MainActivity extends Activity {
                     || host.equals("login.globo.com")
                     || host.equals("conta.globo.com")) return true;
         }
-        return external && isSocialAuthUrl(uri);
+        return external && isAllowedSocialAuthUrl(providerId, uri);
     }
 
     private boolean openProviderInCustomTab(Uri uri) {
@@ -664,8 +760,8 @@ public final class MainActivity extends Activity {
                 .setTitle("Navegador necessário")
                 .setMessage("Para concluir o " + flowLabel
                         + ", esta TV precisa de um navegador compatível instalado. "
-                        + "Instale o Chrome, TV Bro ou outro navegador para Android TV e tente novamente. "
-                        + "O Android System WebView sozinho não abre páginas externas.")
+                        + "Instale ou atualize um navegador com suporte a Chrome Custom Tabs e tente novamente. "
+                        + "O Android System WebView sozinho não conclui login social.")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -746,15 +842,24 @@ public final class MainActivity extends Activity {
         return value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
     }
 
-    private void updateProviderNavigation(String url) {
+    private void updateProviderNavigation(String url, boolean pageFinished) {
         if (providerState == null) return;
         try {
             providerState.put("currentUrl", url);
-            if (isLoginUrl(url)) providerState.put("status", "auth-required");
-            else if (isProviderPlayerUrl(url) || providerPlayerOpened) {
+            if (isLoginUrl(url)) {
+                providerPlayerOpened = false;
+                providerState.put("status", "auth-required");
+                providerState.put("authState", "anonymous");
+                providerState.put("authVerified", false);
+            } else if (pageFinished && isProviderPlayerUrl(url)) {
                 providerPlayerOpened = true;
                 providerState.put("status", "player");
-            } else providerState.put("status", "ready");
+                providerState.put("authState", "authenticated");
+                providerState.put("sessionSurface", "webview");
+                providerState.put("authVerified", true);
+            } else {
+                providerState.put("status", pageFinished ? "ready" : "loading");
+            }
             sendProviderState(providerState);
         } catch (JSONException exception) {
             Log.w(TAG, "Could not update provider state", exception);
@@ -1052,6 +1157,23 @@ public final class MainActivity extends Activity {
             }
         }
 
+        @JavascriptInterface
+        public String openProviderInBrowser(String payload) {
+            try {
+                JSONObject request = new JSONObject(payload);
+                JSONObject response = new JSONObject();
+                response.put("providerId", request.optString("providerId", ""));
+                response.put("channelUrl", request.optString("channelUrl", ""));
+                response.put("channelName", request.optString("channelName", ""));
+                response.put("mode", "browser-player");
+                response.put("status", "external-auth");
+                runOnUiThread(() -> openProviderInBrowserAndReturn(payload));
+                return response.toString();
+            } catch (JSONException exception) {
+                return "{}";
+            }
+        }
+
         @JavascriptInterface public void closeProviderSurface() {
             runOnUiThread(() -> closeProvider("app-request"));
         }
@@ -1086,6 +1208,22 @@ public final class MainActivity extends Activity {
     }
 
     private final class AppWebViewClient extends WebViewClient {
+        @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            if (request.isForMainFrame() && !isAppShellUrl(request.getUrl())) {
+                Log.w(TAG, "Blocking external app-shell navigation: " + request.getUrl());
+                return true;
+            }
+            return false;
+        }
+        @Override @SuppressWarnings("deprecation")
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            Uri uri = Uri.parse(url);
+            if (!isAppShellUrl(uri)) {
+                Log.w(TAG, "Blocking external app-shell navigation: " + uri);
+                return true;
+            }
+            return false;
+        }
         @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             return assetLoader.shouldInterceptRequest(request.getUrl());
         }
@@ -1109,7 +1247,8 @@ public final class MainActivity extends Activity {
             view.postDelayed(() -> view.evaluateJavascript(
                     "window.scrollTo(0,0);document.documentElement.scrollTop=0;document.body.scrollTop=0;",
                     null), 220);
-            markExternalAuthReturnedUnverified();
+            appShellReady = true;
+            view.postDelayed(MainActivity.this::markExternalAuthReturnedUnverified, 260);
             super.onPageFinished(view, url);
         }
     }
@@ -1143,12 +1282,12 @@ public final class MainActivity extends Activity {
             return false;
         }
         @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-            updateProviderNavigation(url);
+            updateProviderNavigation(url, false);
             super.onPageStarted(view, url, favicon);
         }
         @Override public void onPageFinished(WebView view, String url) {
             CookieManager.getInstance().flush();
-            updateProviderNavigation(url);
+            updateProviderNavigation(url, true);
             if (isLoginUrl(url)) injectTvLoginPresentation(view);
             super.onPageFinished(view, url);
         }
