@@ -9,7 +9,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { background: transparent; }
+html, body, #root { width: 100%; height: 100%; overflow: hidden; background: transparent; }
 body { margin: 0; }
 button { font: inherit; }
 
@@ -24,7 +24,7 @@ button { font: inherit; }
 .volume-notice { position: fixed; z-index: 70; top: clamp(18px, 4vh, 42px); right: clamp(18px, 3vw, 42px); display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; color: #f6f8fb; background: rgba(13,19,28,.86); box-shadow: 0 10px 30px rgba(0,0,0,.25); font-size: 13px; font-weight: 600; animation: volume-notice-in .18s ease both; backdrop-filter: blur(8px); }
 @keyframes volume-notice-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 
-.tv-shell { width: 100%; height: 100dvh; min-height: 0; display: flex; overflow: hidden; background: #0a0d13; }
+.tv-shell { width: 100%; height: 100vh; height: 100dvh; min-height: 0; display: flex; overflow: hidden; background: #0a0d13; }
 .sidebar { position: relative; z-index: 3; flex: 0 0 clamp(280px, 20vw, 370px); padding: clamp(34px, 4.8vh, 70px) clamp(28px, 3.2vw, 62px) 24px; background: linear-gradient(110deg, #080b10 0%, #0b1018 82%, rgba(11,16,24,.15) 100%); display: flex; flex-direction: column; min-height: 100%; }
 .brand { display: flex; align-items: center; gap: 14px; margin: 0 0 clamp(40px, 7vh, 88px) 20px; white-space: nowrap; }
 .brand-name { font-size: clamp(22px, 1.8vw, 32px); font-weight: 700; letter-spacing: -1.5px; color: #f7f8fb; }
@@ -66,7 +66,8 @@ button { font: inherit; }
 .provider-login-column strong { color: #fff; font-size: clamp(18px, 1.45vw, 26px); }
 .provider-login-column > span:not(.provider-login-prompt-kicker) { color: #c3cfdd; font-size: 13px; line-height: 1.5; }
 .provider-login-column button { min-height: 38px; margin-top: 4px; padding: 0 15px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 12px; font-weight: 800; cursor: pointer; }
-.provider-login-column button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
+.provider-login-column button:focus { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 18px rgba(99,178,255,.24); }
+.provider-login-column button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 18px rgba(99,178,255,.24); }
 .tv-shell:not(.watching) .hero.provider-login-layout .hero-content { width: min(55%, 730px); }
 .regional-channel-note { max-width: 560px; margin: 10px 0 0; color: #aab7c7; font-size: 11px; line-height: 1.45; }
 .epg { position: relative; z-index: 5; display: flex; flex-direction: column; height: 51.4%; min-height: 0; padding: 0 clamp(18px, 2.1vw, 42px) 20px; background: #111722; }
@@ -87,7 +88,7 @@ button { font: inherit; }
 .program-cell.selected { border: 2px solid #3991ff; background: linear-gradient(135deg, #283747, #1e2937); box-shadow: 0 0 0 1px rgba(62,147,255,.14), inset 0 0 25px rgba(55,144,255,.08); }
 .program-cell.remote-focused { outline: 3px solid #63b2ff; outline-offset: 3px; }
 .program-cell:focus-visible { outline: 3px solid #64b1ff; outline-offset: 2px; }
-.channel-mark { width: clamp(64px, 4.5vw, 84px); height: clamp(34px, 2.5vw, 44px); flex: 0 0 auto; display: grid; place-items: center; color: white; overflow: visible; }
+.channel-mark { width: 84px; height: 44px; width: clamp(64px, 4.5vw, 84px); height: clamp(34px, 2.5vw, 44px); flex: 0 0 auto; display: grid; place-items: center; color: white; overflow: visible; }
 .channel-mark img { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; object-fit: contain; object-position: center; user-select: none; pointer-events: none; }
 .channel-mark.tv-brasil img, .channel-mark.canal-gov img, .channel-mark.tv-camara img { width: 96%; height: 96%; }
 .channel-mark.sbt img, .channel-mark.globo img, .channel-mark.tv-integracao img { width: 94%; height: 94%; }
@@ -104,7 +105,7 @@ button { font: inherit; }
 .hero-external-card span { color: #b7c1ce; font-size: 12px; line-height: 1.45; }
 .hero-external-card a, .mobile-external-card a { padding: 8px 12px; border-radius: 8px; color: #06130b; background: #2be985; font-size: 12px; font-weight: 700; text-decoration: none; }
 .provider-surface { border: 0; background: #0d141f; }
-.hero-provider-surface { position: absolute; z-index: 1; inset: 0; width: 100%; display: grid; place-items: center; padding: 0; background: transparent; }
+.hero-provider-surface { position: absolute; z-index: 1; top: var(--surface-top, 0); right: var(--surface-right, 0); bottom: var(--surface-bottom, 0); left: var(--surface-left, 0); width: 100%; display: grid; place-items: center; padding: 0; background: transparent; }
 .provider-surface-card { display: grid; justify-items: start; gap: 9px; width: min(320px, 100%); padding: 22px; border: 1px solid rgba(255,255,255,.14); border-radius: 16px; color: #f7f9fb; background: rgba(9,14,22,.82); box-shadow: 0 18px 50px rgba(0,0,0,.3); backdrop-filter: blur(8px); }
 .provider-surface-card .channel-mark { width: 42px; height: 42px; }
 .provider-surface-card strong { font-size: clamp(16px, 1.4vw, 23px); }
@@ -116,11 +117,13 @@ button { font: inherit; }
 .provider-handoff-note { color: #b8c8d8 !important; font-size: 10px !important; }
 .provider-surface-card button { min-height: 36px; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; cursor: pointer; }
 .provider-surface-card button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
-.region-dialog-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(4,8,14,.72); backdrop-filter: blur(8px); }
-.region-dialog { width: min(520px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 26px; border: 1px solid rgba(255,255,255,.14); border-radius: 18px; color: #f5f8fb; background: #131b27; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+.region-dialog-backdrop { position: fixed; z-index: 120; top: 0; left: 0; width: 100vw; height: 100vh; display: grid; place-items: center; padding: 24px; background: rgba(4,8,14,.72); backdrop-filter: blur(8px); }
+.region-dialog { width: min(520px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 26px; border: 1px solid rgba(255,255,255,.14); border-radius: 18px; color: #f5f8fb; background: #131b27; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
 .region-dialog-kicker { color: #2be985; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .region-dialog h2 { margin: 9px 0 8px; font-size: 26px; letter-spacing: -.6px; }
 .region-dialog p { margin: 0 0 20px; color: #b4bfcc; font-size: 13px; line-height: 1.5; }
+.region-dialog-location-first { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; }
+.region-dialog-location-first span { color: #94a2b2; font-size: 11px; line-height: 1.4; }
 .region-dialog-label { display: block; margin-bottom: 7px; color: #dfe6ef; font-size: 12px; font-weight: 600; }
 .region-dialog select { width: 100%; padding: 11px 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; color: #f5f8fb; background: #0d141f; font: inherit; font-size: 13px; }
 .region-dialog-preview { display: grid; gap: 3px; margin-top: 12px; padding: 11px 12px; border-radius: 9px; background: rgba(43,233,133,.08); }
@@ -130,7 +133,22 @@ button { font: inherit; }
 .region-dialog-preview li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; color: #e7edf4; font-size: 12px; }
 .region-dialog-preview li span { color: #e7edf4; font-size: 12px; }
 .region-dialog-preview li small { color: #94a2b2; font-size: 10px; text-align: right; }
-.region-dialog select:focus-visible, .region-dialog button:focus-visible, .region-dialog a:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
+.region-dialog select:focus,
+.region-dialog button:focus,
+.region-dialog a:focus,
+.region-dialog input:focus {
+  outline: 3px solid #63b2ff !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 20px rgba(99,178,255,.28);
+  position: relative;
+  z-index: 2;
+}
+.region-dialog select:focus-visible,
+.region-dialog button:focus-visible,
+.region-dialog a:focus-visible,
+.region-dialog input:focus-visible { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 20px rgba(99,178,255,.28); }
+.region-dialog select:focus { border-color: #63b2ff; background: #17283a; }
+.region-dialog button:focus { transform: translateY(-1px); }
 .accounts-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1); }
 .accounts-section-heading h3 { margin: 0; color: #f1f5f9; font-size: 18px; letter-spacing: -.2px; }
 .accounts-section-heading p { margin: 6px 0 13px; color: #93a1b1; font-size: 11px; line-height: 1.45; }
@@ -163,14 +181,16 @@ button { font: inherit; }
 .provider-login-blocked span, .provider-login-blocked small { color: #c7d0db; font-size: 11px; line-height: 1.45; }
 .provider-login-blocked small { color: #94a2b2; }
 .provider-login-fallback { padding: 8px 11px; border-radius: 8px; color: #06130b; background: #2be985; font-size: 10px; font-weight: 800; text-decoration: none; }
-.provider-login-fallback:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
+.provider-login-fallback:focus { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 18px rgba(99,178,255,.24); }
+.provider-login-fallback:focus-visible { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 18px rgba(99,178,255,.24); }
 .provider-login-handoff { display: grid; justify-items: start; align-content: center; gap: 10px; min-height: 270px; padding: 24px; color: #f7f9fb; background: linear-gradient(145deg, rgba(29,67,54,.55), rgba(10,16,24,.95)); }
 .provider-login-handoff .channel-mark { width: 42px; height: 42px; }
 .provider-login-handoff strong { font-size: 14px; }
 .provider-login-handoff span, .provider-login-handoff small { color: #c7d0db; font-size: 11px; line-height: 1.45; }
 .provider-login-handoff small { color: #94a2b2; }
 .provider-login-handoff button { min-height: 36px; padding: 0 13px; border: 1px solid #2be985; border-radius: 8px; color: #06130b; background: #2be985; font-size: 11px; font-weight: 800; cursor: pointer; }
-.provider-login-handoff button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 3px; }
+.provider-login-handoff button:focus { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 18px rgba(99,178,255,.24); }
+.provider-login-handoff button:focus-visible { outline: 3px solid #63b2ff; outline-offset: 4px; box-shadow: 0 0 0 2px rgba(99,178,255,.32), 0 0 18px rgba(99,178,255,.24); }
 .provider-login-status { margin: 0 !important; color: #c9d4df !important; font-size: 11px !important; }
 .provider-login-privacy { color: #8492a2; font-size: 10px; line-height: 1.45; }
 .region-dialog-error { margin-top: 13px !important; margin-bottom: 0 !important; color: #ff9aa5 !important; }
@@ -191,14 +211,14 @@ button { font: inherit; }
 .tv-shell.watching .hero-content { opacity: 0; transform: scale(.98); pointer-events: none; transition: opacity .28s ease, transform .38s ease; }
 .tv-shell.watching .hero-fade, .tv-shell.watching .hero::before { opacity: 0; pointer-events: none; transition: opacity .25s ease; }
 .tv-shell.watching .hero-video { opacity: 1; object-fit: contain; background: #000; transform: scale(1); }
-.tv-shell.watching .hero-provider-surface { inset: 0; width: 100%; padding: 0; background: #000; }
+.tv-shell.watching .hero-provider-surface { top: var(--surface-top, 0); right: var(--surface-right, 0); bottom: var(--surface-bottom, 0); left: var(--surface-left, 0); width: 100%; padding: 0; background: #000; }
 .tv-shell.provider-preview .main-content { background: transparent; }
 .tv-shell.provider-preview { background: transparent; }
 .tv-shell.provider-preview .hero { background: transparent; }
 .tv-shell.provider-preview .hero-art { opacity: 0; }
 .tv-shell.provider-preview .hero-provider-surface { background: transparent; }
 .tv-shell.watching.watch-loading .hero-video { opacity: .2; filter: blur(6px); transform: scale(1.035); }
-.watch-transition { position: absolute; z-index: 5; inset: 0; display: grid; place-items: center; padding: 24px; background: linear-gradient(135deg, rgba(6,10,16,.68), rgba(6,10,16,.42)); backdrop-filter: blur(2px); opacity: 1; visibility: visible; transition: opacity .32s ease, visibility 0s linear 0s; }
+.watch-transition { position: absolute; z-index: 5; top: var(--transition-top, 0); right: var(--transition-right, 0); bottom: var(--transition-bottom, 0); left: var(--transition-left, 0); display: grid; place-items: center; padding: 24px; background: linear-gradient(135deg, rgba(6,10,16,.68), rgba(6,10,16,.42)); backdrop-filter: blur(2px); opacity: 1; visibility: visible; transition: opacity .32s ease, visibility 0s linear 0s; }
 .watch-transition.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .32s ease, visibility 0s linear .32s; }
 .watch-transition-card { display: flex; align-items: center; gap: 14px; min-width: min(270px, 100%); padding: 14px 18px; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; background: rgba(13,19,28,.76); box-shadow: 0 16px 44px rgba(0,0,0,.28); }
 .watch-transition-card .channel-mark { width: 38px; height: 38px; }
@@ -217,6 +237,72 @@ button { font: inherit; }
   .tv-shell.watching .desktop-player-controls { display: flex; }
 }
 @keyframes tv-main-enter { from { opacity: 0; transform: scale(1.025); } to { opacity: 1; transform: scale(1); } }
+
+/* Android TV 9's older WebView can drop clamp() when it is used on an empty
+   flex item. Keep this compatibility fix local to channel marks so the shell
+   remains visually identical to the existing TV layout. */
+.android-tv-shell .channel-mark { width: 70px; height: 36px; }
+.android-tv-shell .channel-cell { gap: 14px; }
+/* Android TV 9's WebView renders backdrop filters and blur transitions on the
+   CPU. Keep the same hierarchy and contrast, but remove those expensive
+   effects from the TV shell so remote navigation remains responsive. */
+.android-tv-shell .provider-login-column,
+.android-tv-shell .provider-surface-card,
+.android-tv-shell .hero-external-card,
+.android-tv-shell .watch-transition,
+.android-tv-shell .volume-notice,
+.android-tv-shell .region-dialog-backdrop { backdrop-filter: none; }
+.android-tv-shell .tv-shell.watching.watch-loading .hero-video { filter: none; transform: none; }
+.android-tv-shell .hero-video,
+.android-tv-shell .watch-transition,
+.android-tv-shell .tv-shell.watching .main-content { transition: none; }
+/* The native Media3 texture is placed behind the shared WebView. Remove the
+   web-only artwork layer for HLS channels so the live image remains visible
+   beneath the existing React overlay and EPG. */
+.android-tv-shell .hero.native-live-layout .hero-art,
+.android-tv-shell .mobile-player.native-live-layout .mobile-player-art { opacity: 0; }
+.android-tv-shell .hero.native-live-layout .hero-video { opacity: 0; }
+.android-tv-shell .main-content { background: transparent; }
+
+/* Android TV 9 ships a Chromium/WebView that predates clamp(), min()/max(),
+   flex-gap and dynamic viewport units. Keep the shared Electron layout as the
+   source of truth, but provide concrete fallbacks for that older renderer.
+   Newer WebViews support these features and continue using the rules above. */
+@supports not (width: clamp(1px, 2px, 3px)) {
+  .android-tv-shell .tv-shell { height: 100vh; }
+  .android-tv-shell .sidebar { flex-basis: 280px; padding: 35px 41px 24px; }
+  .android-tv-shell .brand { gap: 0; margin-bottom: 50px; }
+  .android-tv-shell .brand > .brand-mark { margin-right: 14px; }
+  .android-tv-shell .brand-name { font-size: 23px; }
+  .android-tv-shell .main-nav { row-gap: 10px; }
+  .android-tv-shell .nav-item { gap: 0; min-height: 69px; padding: 9px 20px; }
+  .android-tv-shell .nav-item > svg { margin-right: 22px; }
+  .android-tv-shell .nav-label { font-size: 15px; }
+  .android-tv-shell .nav-count { font-size: 12px; }
+  .android-tv-shell .sidebar-footnote { gap: 0; }
+  .android-tv-shell .sidebar-footnote > * + * { margin-left: 7px; }
+  .android-tv-shell .hero-content { width: 590px; padding: 58px 51px; }
+  .android-tv-shell .channel-title { font-size: 22px; }
+  .android-tv-shell .hero h1 { font-size: 39px; }
+  .android-tv-shell .program-meta { gap: 0; font-size: 13px; }
+  .android-tv-shell .program-meta > * + * { margin-left: 14px; }
+  .android-tv-shell .program-description { font-size: 13px; }
+  .android-tv-shell .provider-login-column { right: 64px; width: 310px; }
+  .android-tv-shell .epg { padding-left: 27px; padding-right: 27px; }
+  .android-tv-shell .epg-head { gap: 7px; font-size: 12px; }
+  .android-tv-shell .epg-row { gap: 7px; min-height: 54px; }
+  .android-tv-shell .channel-cell { gap: 0; padding-left: 10px; padding-right: 10px; font-size: 12px; }
+  .android-tv-shell .channel-cell > .channel-mark { margin-right: 14px; }
+  .android-tv-shell .program-cell { padding-left: 12px; padding-right: 12px; }
+  .android-tv-shell .program-cell strong { font-size: 12px; }
+  .android-tv-shell .program-cell small { font-size: 10px; }
+  .android-tv-shell .hero-external-card { right: 64px; width: 280px; }
+  .android-tv-shell .provider-surface-card { width: 320px; }
+  .android-tv-shell .watch-transition { top: 0; right: 0; bottom: 0; left: 0; }
+  .android-tv-shell .desktop-player-controls { right: 28px; bottom: 24px; left: 28px; }
+  .android-tv-shell .region-dialog-backdrop { height: 100vh; padding: 24px; }
+  .android-tv-shell .region-dialog { width: 520px; max-height: calc(100vh - 32px); }
+}
 
 .mobile-shell { display: none; }
 

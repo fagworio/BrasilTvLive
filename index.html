@@ -8,6 +8,19 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Android TV 9 may ship Chromium 66. Keep the shared React bundle
+      // usable there without changing the application UI or state model.
+      if (!Object.fromEntries) {
+        Object.fromEntries = function (entries) {
+          return entries.reduce(function (result, entry) {
+            result[entry[0]] = entry[1];
+            return result;
+          }, {});
+        };
+      }
+      if (!window.globalThis) window.globalThis = window;
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

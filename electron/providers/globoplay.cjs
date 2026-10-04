@@ -49,7 +49,7 @@ function applyVideoPresentation(webContents) {
 
 function requestPlayerFullscreen(webContents, providerState, onRetry, attempt = 0) {
   if (!webContents || webContents.isDestroyed()) return;
-  if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
+  if (providerState?.providerId !== 'globoplay' || !['watch', 'player'].includes(providerState?.mode)) return;
 
   webContents.executeJavaScript(`(() => {
     const player = document.querySelector('#wp3-player-1');

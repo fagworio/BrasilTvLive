@@ -2,6 +2,13 @@ import React, { StrictMode, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createRoot } from 'react-dom/client';
 import Hls from 'hls.js';
 import {
+  getProviderLayer,
+  getProviderPreviewStatus,
+  isCurrentProviderTarget,
+  normalizeProviderEvent,
+  shouldResumeProviderChannel,
+} from './providerLifecycle';
+import {
   Baby,
   Clapperboard,
   CircleUserRound,
@@ -25,6 +32,9 @@ import {
   Zap,
 } from 'lucide-react';
 import './styles.css';
+
+const isAndroidTvShell = window.location.hostname === 'appassets.androidplatform.net';
+if (isAndroidTvShell) document.documentElement.classList.add('android-tv-shell');
 
 const navItems = [
   { label: 'Favoritos', count: '12 canais', icon: Star },
@@ -107,6 +117,7 @@ const regionOptions = [
 ];
 
 const GLOBO_LIVE_URL = 'https://globoplay.globo.com/tv-globo/ao-vivo/7832875/';
+const GLOBO_LOGIN_URL = 'https://login.globo.com/login/1';
 const GLOBO_REGION_CATALOG_URLS = {
   'mg-bh': 'https://globoplay.globo.com/categorias/globo-minas/',
   'mg-uberlandia': 'https://globoplay.globo.com/categorias/tv-integracao/',
@@ -170,7 +181,11 @@ function getRecordPlusLoginUrl(channelUrl) {
 
 function getProviderLoginUrl(providerId, channelUrl) {
   if (providerId === 'recordplus') return getRecordPlusLoginUrl(channelUrl);
-  if (providerId === 'globoplay') return channelUrl || GLOBO_LIVE_URL;
+  if (providerId === 'globoplay') {
+    const loginUrl = new URL(GLOBO_LOGIN_URL);
+    loginUrl.searchParams.set('url', channelUrl || GLOBO_LIVE_URL);
+    return loginUrl.toString();
+  }
   return accountProviders[providerId]?.fallbackUrl || channelUrl;
 }
 
@@ -455,66 +470,202 @@ const PREVIEW_LOAD_TIMEOUT_MS = 15000;
 const PLAYER_LOAD_TIMEOUT_MS = 20000;
 
 function getDesktopBridge() {
-  return typeof window !== 'undefined' ? window.brasilTvLiveDesktop : undefined;
+  if (typeof window === 'undefined') return undefined;
+  if (window.brasilTvLiveDesktop) return window.brasilTvLiveDesktop;
+
+  // Android keeps the BrasilTvLive shell in this WebView and opens the
+  // provider surface in a native WebView overlay.  Expose the same small
+  // bridge contract used by Electron so the channel state machine remains
+  // identical on desktop, Android TV and Android.
+  const nativeBridge = window.AndroidBrasilTvLive;
+  if (!nativeBridge) return undefined;
+  if (window.__brasiltvliveAndroidBridge) return window.__brasiltvliveAndroidBridge;
+
+  const bridge = {
+    isDesktop: true,
+    openProviderSurface: (payload) => Promise.resolve(JSON.parse(nativeBridge.openProviderSurface(JSON.stringify(payload)) || '{}')),
+    closeProviderSurface: () => nativeBridge.closeProviderSurface(),
+    setProviderBounds: (bounds) => nativeBridge.setProviderBounds(JSON.stringify(bounds)),
+    setProviderLayer: (layer) => nativeBridge.setProviderLayer(layer),
+    setProviderAudioMuted: (muted) => nativeBridge.setProviderAudioMuted(Boolean(muted)),
+    onProviderState: (handler) => {
+      const listener = (event) => handler(event.detail);
+      window.addEventListener('brasiltvlive-provider-state', listener);
+      return () => window.removeEventListener('brasiltvlive-provider-state', listener);
+    },
+  };
+  window.__brasiltvliveAndroidBridge = bridge;
+  return bridge;
 }
 
-function useStreamSource(videoRef, streamUrl, onStreamError, onStreamPlaying) {
+function useStreamSource(videoRef, streamUrl, onStreamError, onStreamPlaying, nativeMuted = true, nativeVolume = 0, nativeFullscreen = false) {
   const errorRef = useRef(onStreamError);
   const playingRef = useRef(onStreamPlaying);
+  const nativeErrorRef = useRef(onStreamError);
 
   useEffect(() => {
     errorRef.current = onStreamError;
     playingRef.current = onStreamPlaying;
+    nativeErrorRef.current = onStreamError;
   }, [onStreamError, onStreamPlaying]);
+
+  const isAndroidWebView = Boolean(window.AndroidBrasilTvLive);
+  const nativeLiveBridge = isAndroidWebView ? window.AndroidBrasilTvLive : null;
+  const androidStreamUrl = isAndroidWebView
+    ? ({
+      'https://tvbrasil-stream.ebc.com.br/index.m3u8': 'https://tvbrasil-stream.ebc.com.br/EBC_HD-avc1_900000=10003.m3u8',
+      'https://canalgov-stream.ebc.com.br/index.m3u8': 'https://canalgov-stream.ebc.com.br/GOV-avc1_900000=10002.m3u8',
+    }[streamUrl] || streamUrl)
+    : streamUrl;
+
+  useEffect(() => {
+    if (!nativeLiveBridge?.setLiveStreamAudio) return;
+    nativeLiveBridge.setLiveStreamAudio(Boolean(nativeMuted), Math.max(0, Math.min(1, nativeVolume)));
+    nativeLiveBridge.setLiveStreamLayout?.(Boolean(nativeFullscreen));
+  }, [nativeLiveBridge, nativeMuted, nativeVolume, nativeFullscreen, streamUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
 
     let hls;
+    let nativeFallbackStarted = false;
+    let nativeFallbackTimer;
+    let hasReportedPlaying = false;
     const playWhenReady = () => video.play().catch(() => {});
     const reportError = () => errorRef.current?.();
     const reportMediaError = reportError;
-    const reportPlaying = () => playingRef.current?.();
+    const reportPlaying = () => {
+      hasReportedPlaying = true;
+      playingRef.current?.();
+    };
+
+    // Android 9 WebView can fetch the HLS playlist but fails to decode the
+    // broadcaster's MPEG-TS segments through HTML MediaSource. The native
+    // bridge renders only this video layer with Media3; React keeps owning the
+    // navigation, overlay, fullscreen and control UI above it.
+    if (isAndroidWebView && nativeLiveBridge?.openLiveStream) {
+      const handleNativeState = (event) => {
+        const detail = event.detail || {};
+        if (detail.url !== streamUrl && detail.url !== androidStreamUrl) return;
+        if (detail.status === 'ready' || detail.status === 'playing') reportPlaying();
+        if (detail.status === 'error') nativeErrorRef.current?.();
+      };
+      window.addEventListener('brasiltvlive-native-stream-state', handleNativeState);
+      // Media3 can follow the master playlist and select the linked AAC
+      // rendition. Opening the video-only variant directly would make some
+      // Android 9 builds wait forever for the companion audio playlist.
+      nativeLiveBridge.openLiveStream(streamUrl);
+      nativeLiveBridge.setLiveStreamAudio?.(Boolean(nativeMuted), Math.max(0, Math.min(1, nativeVolume)));
+      return () => {
+        window.removeEventListener('brasiltvlive-native-stream-state', handleNativeState);
+        nativeLiveBridge.closeLiveStream?.();
+      };
+    }
 
     // HLS starts muted so channel changes remain autoplay-safe; the parent
     // applies the selected volume after the real `playing` event.
     video.muted = true;
     video.addEventListener('error', reportMediaError);
     video.addEventListener('playing', reportPlaying);
+    // The source is attached after the element mounts. Older WebViews do not
+    // reliably honor the autoplay attribute at that moment, so retry when
+    // the first decoded buffer becomes available.
+    video.addEventListener('canplay', playWhenReady);
+    video.addEventListener('loadeddata', playWhenReady);
 
     const supportsNativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL'));
-    if (Hls.isSupported()) {
-      hls = new Hls({ enableWorker: true, backBufferLength: 30 });
-      hls.loadSource(streamUrl);
+    const hlsSupported = Hls.isSupported();
+    console.info(`[BrasilTvLive] stream init ${JSON.stringify({ streamUrl, androidStreamUrl, isAndroidWebView, hlsSupported, supportsNativeHls })}`);
+    const startHlsJs = () => {
+      if (!hlsSupported || hls) {
+        reportError();
+        return;
+      }
+      hls = new Hls({
+        // Android TV 9 is more stable when transmuxing stays in the WebView
+        // process; its older Blob-worker implementation can stall HLS buffers.
+        enableWorker: false,
+        lowLatencyMode: false,
+        backBufferLength: isAndroidWebView ? 15 : 30,
+        capLevelToPlayerSize: true,
+      });
+      hls.loadSource(androidStreamUrl);
       hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, playWhenReady);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.info(`[BrasilTvLive] stream manifest parsed ${androidStreamUrl}`);
+        playWhenReady();
+      });
+      hls.on(Hls.Events.FRAG_LOADED, () => console.info(`[BrasilTvLive] stream fragment loaded ${androidStreamUrl}`));
+      hls.on(Hls.Events.BUFFER_APPENDED, () => console.info(`[BrasilTvLive] stream buffer appended ${androidStreamUrl}`));
       hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.warn(`[BrasilTvLive] stream error ${JSON.stringify({ streamUrl: androidStreamUrl, type: data.type, details: data.details, fatal: data.fatal })}`);
         if (data.fatal) {
           reportError();
           hls.destroy();
         }
       });
+    };
+    const handleNativeError = () => {
+      if (isAndroidWebView && !nativeFallbackStarted && hlsSupported) {
+        nativeFallbackStarted = true;
+        video.removeEventListener('error', handleNativeError);
+        video.removeAttribute('src');
+        video.load();
+        startHlsJs();
+      }
+    };
+
+    // Android TV's native media stack is the most reliable path for the
+    // MPEG-TS live feeds once the compatible rendition is selected above.
+    // Hls.js remains the fallback for devices without native support and the
+    // primary path on desktop Chromium.
+    if (isAndroidWebView) {
+      video.addEventListener('error', handleNativeError);
+      video.addEventListener('loadedmetadata', playWhenReady, { once: true });
+      video.src = androidStreamUrl;
+      video.load();
+      playWhenReady();
+      if (hlsSupported) {
+        // Some Android 9 WebViews expose native HLS but never deliver a DOM
+        // error when their media provider rejects an HTTPS playlist. Switch
+        // to the Hls.js path after a short grace period instead of leaving a
+        // silent loading surface on screen.
+        nativeFallbackTimer = window.setTimeout(() => {
+          if (hasReportedPlaying || nativeFallbackStarted) return;
+          nativeFallbackStarted = true;
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+          startHlsJs();
+        }, 5000);
+      }
+    } else if (Hls.isSupported()) {
+      startHlsJs();
     } else if (supportsNativeHls) {
       video.addEventListener('loadedmetadata', playWhenReady, { once: true });
-      video.src = streamUrl;
+      video.src = androidStreamUrl;
       video.load();
       playWhenReady();
     }
 
     return () => {
       hls?.destroy();
+      window.clearTimeout(nativeFallbackTimer);
       video.removeEventListener('loadedmetadata', playWhenReady);
+      video.removeEventListener('canplay', playWhenReady);
+      video.removeEventListener('loadeddata', playWhenReady);
+      video.removeEventListener('error', handleNativeError);
       video.removeEventListener('error', reportMediaError);
       video.removeEventListener('playing', reportPlaying);
     };
   }, [videoRef, streamUrl]);
 }
 
-function StreamVideo({ videoRef, streamUrl, className, onStreamError, onStreamPlaying, ...props }) {
+function StreamVideo({ videoRef, streamUrl, className, onStreamError, onStreamPlaying, nativeMuted, nativeVolume, nativeFullscreen, ...props }) {
   const internalRef = useRef(null);
   const activeRef = videoRef || internalRef;
-  useStreamSource(activeRef, streamUrl, onStreamError, onStreamPlaying);
+  useStreamSource(activeRef, streamUrl, onStreamError, onStreamPlaying, nativeMuted, nativeVolume, nativeFullscreen);
   return <video ref={activeRef} className={className} {...props} />;
 }
 
@@ -816,12 +967,12 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name, watch: true });
                 return;
               }
-              if (isThisHandoff && ['open', 'loading'].includes(providerHandoff.status)) {
+              if (isThisHandoff && ['open', 'loading', 'external-auth', 'external-auth-returned'].includes(providerHandoff.status)) {
                 onOpenProviderChannel?.({ providerId: channel.provider, channelUrl, channelName: channel.name });
                 return;
               }
               onOpenProviderLogin({ providerId: channel.provider, channelUrl, channelName: channel.name });
-            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : isThisHandoff && ['open', 'loading', 'ready', 'player'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
+            }}>{!onOpenProviderLogin ? 'Abrir Contas de TV' : isThisHandoff && ['open', 'loading', 'ready', 'player', 'external-auth', 'external-auth-returned'].includes(providerHandoff.status) ? (isDesktopProvider ? 'Abrir player no app' : 'Abrir player no popup') : (isDesktopProvider ? (isConnected ? 'Abrir player no app' : 'Abrir login no app') : 'Abrir login no PC')}</button>}
             {(!isDesktopProvider || !isConnected) && <a className="provider-channel-link" href={channelUrl} target="_blank" rel="noreferrer">Abrir {channel.name} no {provider.label}</a>}
           </div> : <button type="button" onClick={(event) => { event.stopPropagation(); onOpenAccounts?.(); }}>{needsReconnect ? 'Reconectar conta' : 'Abrir Contas de TV'}</button>}
           {isThisHandoff && <span className="provider-handoff-note" role="status" aria-live="polite">
@@ -835,6 +986,8 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
                 ? isDesktopProvider ? 'A superfície foi fechada. Abra o canal novamente para continuar com a sessão persistente.' : 'A janela foi fechada. Se o login terminou, abra o player oficial para continuar.'
               : providerHandoff.status === 'player'
                   ? isDesktopProvider ? `O player oficial de ${provider.label} está aberto dentro do BrasilTvLive.` : `O player oficial de ${provider.label} foi aberto na mesma janela.`
+              : ['external-auth', 'external-auth-returned'].includes(providerHandoff.status)
+                ? `O login de ${provider.label} está aberto no navegador seguro. Conclua a autenticação na página oficial e retorne ao BrasilTvLive.`
               : providerHandoff.status === 'auth-required'
                 ? `${provider.label} solicitou login nesta sessão. Conclua a autenticação para abrir o canal escolhido.`
                   : isDesktopProvider ? 'Não foi possível carregar o player oficial. Tente abrir o canal novamente.' : 'O navegador bloqueou o popup. Use o botão de login ou abra o canal diretamente.'}
@@ -860,7 +1013,7 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
   );
 }
 
-function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, providerHandoff }) {
+function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, providerHandoff, closeButtonRef: externalCloseButtonRef, actionButtonRef }) {
   const closeButtonRef = useRef(null);
   const provider = accountProviders[providerId];
   const providerUrl = getProviderLoginUrl(providerId);
@@ -869,7 +1022,8 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
   const isDesktopSurface = Boolean(getDesktopBridge()?.isDesktop);
 
   useEffect(() => {
-    closeButtonRef.current?.focus();
+    const targetRef = externalCloseButtonRef || closeButtonRef;
+    targetRef.current?.focus();
   }, []);
 
   if (!provider) return null;
@@ -896,15 +1050,15 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
           <span className="region-dialog-kicker">Superfície oficial</span>
           <h3 id="provider-login-title">Conectar {provider.label}</h3>
         </div>
-        <button ref={closeButtonRef} type="button" className="provider-login-close" onClick={onClose}>Voltar</button>
+        <button ref={externalCloseButtonRef || closeButtonRef} type="button" className="provider-login-close" onClick={onClose}>Voltar</button>
       </div>
       <div className="provider-login-frame-wrap">
         {isProviderSurface ? <div className="provider-login-handoff">
           <ChannelMark variant={provider.mark} />
           <strong>{isDesktopSurface ? `Login de ${provider.label} dentro do app` : `Login de ${provider.label} no navegador`}</strong>
           <span>{isDesktopSurface ? `A página oficial será carregada dentro do BrasilTvLive. A sessão de ${provider.label} fica persistente no desktop e não é copiada para o app.` : `O login será aberto em uma janela própria. Depois de concluir, volte para o BrasilTvLive e abra o canal oficial.`}</span>
-          {onOpenProviderLogin && <button type="button" onClick={() => onOpenProviderLogin({ providerId })}>
-            {providerHandoff?.providerId === providerId && ['open', 'loading'].includes(providerHandoff.status) ? (isDesktopSurface ? 'Login aberto no app' : 'Login aberto') : (isDesktopSurface ? 'Abrir login no app' : 'Abrir login em janela')}
+          {onOpenProviderLogin && <button ref={actionButtonRef} type="button" onClick={() => onOpenProviderLogin({ providerId })}>
+            {providerHandoff?.providerId === providerId && ['open', 'loading', 'external-auth', 'external-auth-returned'].includes(providerHandoff.status) ? (isDesktopSurface ? 'Login aberto no app' : 'Login aberto') : (isDesktopSurface ? 'Abrir login no app' : 'Abrir login em janela')}
           </button>}
           {!isDesktopSurface && <a className="provider-login-fallback" href={provider.fallbackUrl} target="_blank" rel="noreferrer">Abrir login em nova aba</a>}
           {providerHandoff?.providerId === providerId && <small role="status" aria-live="polite">
@@ -914,6 +1068,8 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
                 ? 'Carregando a superfície oficial…'
               : providerHandoff.status === 'closed'
                 ? isDesktopSurface ? 'A superfície foi fechada. O BrasilTvLive mantém a sessão persistente para o próximo acesso.' : 'A janela foi fechada. O BrasilTvLive não consegue verificar o login externo.'
+              : ['external-auth', 'external-auth-returned'].includes(providerHandoff.status)
+                ? `Conclua o login de ${provider.label} no navegador seguro. O BrasilTvLive não copia cookies nem credenciais.`
                 : 'O popup foi bloqueado; use a nova aba para continuar.'}
           </small>}
         </div> : surfaceState === 'blocked' ? <div className="provider-login-blocked" role="alert">
@@ -972,18 +1128,22 @@ function Brand() {
   );
 }
 
+const channelLogoBase = isAndroidTvShell
+  ? '/assets/web/channel-logos'
+  : '/channel-logos';
+
 const channelLogoSources = {
-  'tv-brasil': '/channel-logos/tv-brasil.svg',
-  'canal-gov': '/channel-logos/canal-gov.svg',
-  'tv-camara': '/channel-logos/tv-camara.svg',
-  'sbt': '/channel-logos/sbt.svg',
-  'sbt-news': '/channel-logos/sbt-news.svg',
-  'record': '/channel-logos/record.svg',
-  'record-news': '/channel-logos/record-news.svg',
-  'band': '/channel-logos/band.svg',
-  'redetv': '/channel-logos/redetv.svg',
-  'globo': '/channel-logos/globo.svg',
-  'tv-integracao': '/channel-logos/tv-integracao.svg',
+  'tv-brasil': `${channelLogoBase}/tv-brasil.svg`,
+  'canal-gov': `${channelLogoBase}/canal-gov.svg`,
+  'tv-camara': `${channelLogoBase}/tv-camara.svg`,
+  'sbt': `${channelLogoBase}/sbt.svg`,
+  'sbt-news': `${channelLogoBase}/sbt-news.svg`,
+  'record': `${channelLogoBase}/record.svg`,
+  'record-news': `${channelLogoBase}/record-news.svg`,
+  'band': `${channelLogoBase}/band.svg`,
+  'redetv': `${channelLogoBase}/redetv.svg`,
+  'globo': `${channelLogoBase}/globo.svg`,
+  'tv-integracao': `${channelLogoBase}/tv-integracao.svg`,
 };
 
 function ChannelMark({ variant }) {
@@ -1123,7 +1283,7 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, isP
   }, [channel.streamUrl, isExternal, isProvider, isEmbed, isWatching, isMuted, volume, videoRef]);
 
   return (
-    <section className={`hero ${providerNeedsLogin ? 'provider-login-layout' : ''}`} aria-label="Programa atual" onMouseEnter={revealControls} onMouseMove={revealControls} onMouseLeave={hideControls}>
+    <section className={`hero ${providerNeedsLogin ? 'provider-login-layout' : ''} ${window.AndroidBrasilTvLive && channel.streamUrl ? 'native-live-layout' : ''}`} aria-label="Programa atual" onMouseEnter={revealControls} onMouseMove={revealControls} onMouseLeave={hideControls}>
       <div className="hero-art" />
       {isExternal ? (
         <div className="hero-external-card">
@@ -1151,6 +1311,9 @@ function Hero({ channel, videoRef, isWatching, isPlayerLoading, playerError, isP
           className="hero-video"
           autoPlay
           muted={!isWatching || isMuted}
+          nativeMuted={!isWatching || isMuted}
+          nativeVolume={isWatching ? volume : 0}
+          nativeFullscreen={isWatching}
           loop
           playsInline
           onStreamError={() => onPlaybackError(channel.id)}
@@ -1266,7 +1429,7 @@ function Epg({ channels, providerAccounts, isFocused, focusedRow, focusedCol, se
 
 const TV_NAV_COUNT = navItems.length + 1;
 
-function useTvRemoteController({ channels, isWatching = false, onChannelStep, onVolumeStep, onMuteToggle } = {}) {
+function useTvRemoteController({ channels, isWatching = false, isModalOpen = false, onChannelStep, onVolumeStep, onMuteToggle } = {}) {
   const [focusArea, setFocusArea] = useState('nav');
   const [focusedNav, setFocusedNav] = useState(1);
   const [focusedRow, setFocusedRow] = useState(0);
@@ -1278,17 +1441,29 @@ function useTvRemoteController({ channels, isWatching = false, onChannelStep, on
 
   useEffect(() => {
     if (window.matchMedia(MOBILE_QUERY).matches) return;
+    if (isModalOpen) return;
     const focusTarget = focusArea === 'nav'
       ? navRefs.current[focusedNav]
       : programRefs.current[`${focusedRow}-${focusedCol}`];
     if (!focusTarget) return;
     focusTarget.focus({ preventScroll: true });
     if (focusArea === 'epg') focusTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [focusArea, focusedNav, focusedRow, focusedCol]);
+    // Chromium 66 (Android TV 9) ignores the focus preventScroll option and
+    // can move the document viewport when the first remote target receives
+    // focus. The TV shell owns scrolling in its panels, so restore the page
+    // origin after that initial focus without changing desktop behavior.
+    if (window.AndroidBrasilTvLive) {
+      window.requestAnimationFrame(() => window.scrollTo(0, 0));
+    }
+  }, [focusArea, focusedNav, focusedRow, focusedCol, isModalOpen]);
 
   useEffect(() => {
     const onRemoteKey = (event) => {
       if (window.matchMedia(MOBILE_QUERY).matches) return;
+      // A modal owns the remote while it is open. Without this guard, a
+      // permission prompt can return focus to the background navigation and
+      // the next DPAD event moves the cursor behind the modal.
+      if (isModalOpen) return;
 
       const key = event.key;
       const isBack = key === 'Escape' || key === 'Backspace' || key === 'BrowserBack' || key === 'GoBack' || key === 'Back';
@@ -1370,7 +1545,7 @@ function useTvRemoteController({ channels, isWatching = false, onChannelStep, on
 
     window.addEventListener('keydown', onRemoteKey);
     return () => window.removeEventListener('keydown', onRemoteKey);
-  }, [focusArea, focusedNav, focusedRow, focusedCol, selectedNav, isWatching, channels.length, onChannelStep, onVolumeStep, onMuteToggle]);
+  }, [focusArea, focusedNav, focusedRow, focusedCol, selectedNav, isWatching, isModalOpen, channels.length, onChannelStep, onVolumeStep, onMuteToggle]);
 
   return {
     focusArea,
@@ -1529,7 +1704,7 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
   return (
     <section
       ref={playerRef}
-      className={`mobile-player ${isPlaying ? 'playing' : 'paused'} ${isFullscreen ? 'is-fullscreen' : ''}`}
+      className={`mobile-player ${isPlaying ? 'playing' : 'paused'} ${isFullscreen ? 'is-fullscreen' : ''} ${window.AndroidBrasilTvLive && channel.streamUrl ? 'native-live-layout' : ''}`}
       aria-label="Player do programa atual"
       onClick={handlePlayerClick}
       onTouchStart={handleTouchStart}
@@ -1562,6 +1737,9 @@ function MobilePlayer({ channel, onChannelStep, onPlaybackReady, onPlaybackError
           className="mobile-player-video"
           autoPlay
           muted={!isFullscreen}
+          nativeMuted={!isFullscreen}
+          nativeVolume={isFullscreen ? 1 : 0}
+          nativeFullscreen={isFullscreen}
           loop
           playsInline
           preload="auto"
@@ -1652,7 +1830,7 @@ function getProviderStatusLabel(status) {
   }[status] || 'Não conectado';
 }
 
-function ProviderAccountCard({ provider, account, onConnect, onDisconnect }) {
+function ProviderAccountCard({ provider, account, onConnect, onDisconnect, actionRef }) {
   const status = account?.status || PROVIDER_STATUS.DISCONNECTED;
   const isConnected = status === PROVIDER_STATUS.CONNECTED;
   const needsReconnect = status === PROVIDER_STATUS.EXPIRED || status === PROVIDER_STATUS.ERROR;
@@ -1667,33 +1845,203 @@ function ProviderAccountCard({ provider, account, onConnect, onDisconnect }) {
         {account?.lastVerifiedAt && <small>Verificado recentemente</small>}
       </div>
       {isConnected ? (
-        <button type="button" className="provider-account-action secondary" onClick={() => onDisconnect(provider.id)}>Desconectar</button>
+        <button ref={actionRef} type="button" className="provider-account-action secondary" onClick={() => onDisconnect(provider.id)}>Desconectar</button>
       ) : (
-        <button type="button" className="provider-account-action" onClick={() => onConnect(provider.id)}>{actionLabel}</button>
+        <button ref={actionRef} type="button" className="provider-account-action" onClick={() => onConnect(provider.id)}>{actionLabel}</button>
       )}
     </article>
   );
 }
 
 function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegionChange, onSave, onUseLocation, isLocating, locationError, onClose, isFirstAccess, providerAccounts, onConnectProvider, onDisconnectProvider, accountNotice, activeProviderLogin, onCloseProviderLogin, onOpenProviderLogin, providerHandoff }) {
+  const dialogRef = useRef(null);
   const selectRef = useRef(null);
+  const locationButtonRef = useRef(null);
+  const saveButtonRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const providerActionRefs = useRef({});
+  const providerLoginCloseRef = useRef(null);
+  const providerLoginActionRef = useRef(null);
   const stationSummary = getRegionalStationSummary(selectedRegionId);
+  // Provider actions are intentionally hidden on the first-access dialog. Do
+  // not include those invisible controls in the TV focus graph, otherwise
+  // ArrowRight from the region select lands on a non-existent element and
+  // the remote appears to stop responding.
+  const providerIds = isFirstAccess ? [] : Object.keys(accountProviders || {});
+
+  const getProviderActionRef = (providerId) => {
+    if (!providerActionRefs.current[providerId]) providerActionRefs.current[providerId] = { current: null };
+    return providerActionRefs.current[providerId];
+  };
 
   useEffect(() => {
-    selectRef.current?.focus();
-    const handleDialogKeyDown = (event) => {
-      if (event.key === 'Escape' && !isFirstAccess) onClose();
+    // Location is an optional first step. Start there so the user can skip
+    // automatic detection and continue to the manual region field freely.
+    const frame = window.requestAnimationFrame(() => locationButtonRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    // Android may return focus to the element that opened the permission
+    // prompt. Keep the modal as the only focus scope and put the user back on
+    // a useful control after location succeeds or fails.
+    const frame = window.requestAnimationFrame(() => {
+      if (locationError) selectRef.current?.focus({ preventScroll: true });
+      else if (regionSource === 'auto') saveButtonRef.current?.focus({ preventScroll: true });
+      else if (!isLocating) locationButtonRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isLocating, locationError, regionSource]);
+
+  useEffect(() => {
+    const handleFocusIn = (event) => {
+      if (dialogRef.current?.contains(event.target)) return;
+      window.requestAnimationFrame(() => {
+        if (!dialogRef.current) return;
+        selectRef.current?.focus({ preventScroll: true });
+      });
     };
-    document.addEventListener('keydown', handleDialogKeyDown);
-    return () => document.removeEventListener('keydown', handleDialogKeyDown);
-  }, [isFirstAccess, onClose]);
+    const handleWindowKeyDown = (event) => {
+      if (dialogRef.current?.contains(event.target)) return;
+      const isBack = event.key === 'Escape' || event.key === 'Backspace' || event.key === 'BrowserBack' || event.key === 'GoBack' || event.key === 'Back';
+      const isModalKey = isBack || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' ', 'NumpadEnter'].includes(event.key);
+      if (!isModalKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (isBack) onClose();
+      else selectRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener('focusin', handleFocusIn);
+    window.addEventListener('keydown', handleWindowKeyDown, true);
+    return () => {
+      document.removeEventListener('focusin', handleFocusIn);
+      window.removeEventListener('keydown', handleWindowKeyDown, true);
+    };
+  }, [onClose]);
+
+  const focusDialogControl = (controlRef) => {
+    controlRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleDialogKeyDownCapture = (event) => {
+    const { key } = event;
+    const activeElement = document.activeElement;
+    const isBack = key === 'Escape' || key === 'Backspace' || key === 'BrowserBack' || key === 'GoBack' || key === 'Back';
+    const isOk = key === 'Enter' || key === ' ' || key === 'NumpadEnter';
+
+    // The TV controller listens at window level. Capture modal keys before
+    // they reach it so it cannot move the background navigation underneath
+    // this form or make the first-access dialog appear frozen.
+    if (isBack) {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+
+    if (isOk) {
+      if (activeElement === selectRef.current) {
+        // The region select is controlled by DPAD Up/Down below. On Android
+        // TV, opening the native <select> popup with Enter can trap focus in
+        // the WebView. Treat the current value as selected and move to the
+        // visible confirmation action instead.
+        event.preventDefault();
+        event.stopPropagation();
+        focusDialogControl(saveButtonRef);
+        return;
+      }
+      event.stopPropagation();
+      return;
+    }
+
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return;
+
+    // Android TV 9's Chromium/WebView moves focus away from a native select
+    // when DPAD Up/Down is pressed. Change the controlled value ourselves so
+    // the form keeps focus and the preview updates without opening a second
+    // custom list or losing the provider form style.
+    if (activeElement === selectRef.current && (key === 'ArrowUp' || key === 'ArrowDown')) {
+      event.preventDefault();
+      event.stopPropagation();
+      const currentIndex = Math.max(0, regionOptions.findIndex((option) => option.regionId === selectedRegionId));
+      const isFirstOption = currentIndex === 0;
+      const isLastOption = currentIndex === regionOptions.length - 1;
+      if (key === 'ArrowUp' && isFirstOption) {
+        focusDialogControl(locationButtonRef);
+      } else if (key === 'ArrowDown' && isLastOption) {
+        if (providerIds.length) focusDialogControl(getProviderActionRef(providerIds[0]));
+        else focusDialogControl(saveButtonRef);
+      } else {
+        const nextIndex = key === 'ArrowDown' ? currentIndex + 1 : currentIndex - 1;
+        onSelectedRegionChange(regionOptions[nextIndex].regionId);
+        focusDialogControl(selectRef);
+      }
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (activeElement === locationButtonRef.current) {
+      if (key === 'ArrowDown') focusDialogControl(selectRef);
+      else if (key === 'ArrowRight') focusDialogControl(saveButtonRef);
+      return;
+    }
+    if (activeElement === selectRef.current) {
+      if (key === 'ArrowLeft' || key === 'ArrowUp') focusDialogControl(locationButtonRef);
+      else if (key === 'ArrowRight') focusDialogControl(providerIds.length ? getProviderActionRef(providerIds[0]) : saveButtonRef);
+      return;
+    }
+    const providerIndex = providerIds.findIndex((providerId) => activeElement === getProviderActionRef(providerId).current);
+    if (providerIndex >= 0) {
+      if (key === 'ArrowUp') focusDialogControl(selectRef);
+      else if (key === 'ArrowDown') {
+        const nextProviderId = providerIds[providerIndex + 1];
+        focusDialogControl(nextProviderId ? getProviderActionRef(nextProviderId) : saveButtonRef);
+      } else if (key === 'ArrowLeft') {
+        focusDialogControl(selectRef);
+      }
+      return;
+    }
+    if (activeElement === saveButtonRef.current) {
+      if (key === 'ArrowLeft') focusDialogControl(locationButtonRef);
+      else if (key === 'ArrowUp') {
+        const lastProviderId = providerIds[providerIds.length - 1];
+        focusDialogControl(lastProviderId ? getProviderActionRef(lastProviderId) : selectRef);
+      }
+      else if (closeButtonRef.current) focusDialogControl(closeButtonRef);
+      else focusDialogControl(saveButtonRef);
+      return;
+    }
+    if (activeElement === closeButtonRef.current) {
+      if (key === 'ArrowUp' || key === 'ArrowLeft') focusDialogControl(saveButtonRef);
+      else focusDialogControl(locationButtonRef);
+      return;
+    }
+
+    if (activeElement === providerLoginCloseRef.current) {
+      if (key === 'ArrowDown' || key === 'ArrowRight') focusDialogControl(providerLoginActionRef);
+      else if (key === 'ArrowLeft' || key === 'ArrowUp') focusDialogControl(locationButtonRef);
+      return;
+    }
+    if (activeElement === providerLoginActionRef.current) {
+      if (key === 'ArrowUp' || key === 'ArrowLeft') focusDialogControl(providerLoginCloseRef);
+      return;
+    }
+
+    focusDialogControl(locationButtonRef);
+  };
 
   return (
     <div className="region-dialog-backdrop" role="presentation">
-      <section className="region-dialog" role="dialog" aria-modal="true" aria-labelledby="region-dialog-title" aria-describedby="region-dialog-description">
+      <section ref={dialogRef} className="region-dialog" role="dialog" aria-modal="true" aria-labelledby="region-dialog-title" aria-describedby="region-dialog-description" onKeyDownCapture={handleDialogKeyDownCapture}>
         <div className="region-dialog-kicker">BrasilTvLive</div>
         <h2 id="region-dialog-title">{isFirstAccess ? 'Canais da sua região' : 'Configurações'}</h2>
         <p id="region-dialog-description">{isFirstAccess ? 'Escolha sua região para exibirmos as emissoras e afiliadas disponíveis na sua praça.' : 'Gerencie sua praça e as contas usadas pelos canais que exigem autenticação.'}</p>
+        <div className="region-dialog-location-first">
+          <button ref={locationButtonRef} type="button" className="region-secondary-button" onClick={onUseLocation} disabled={isLocating}>{isLocating ? 'Localizando…' : 'Usar localização'}</button>
+          <span>Opcional: tente localizar sua praça automaticamente.</span>
+        </div>
         <label className="region-dialog-label" htmlFor="region-select">Região atual</label>
         <select ref={selectRef} id="region-select" value={selectedRegionId} onChange={(event) => onSelectedRegionChange(event.target.value)}>
           {regionOptions.map((option) => <option key={option.regionId} value={option.regionId}>{option.label}</option>)}
@@ -1711,11 +2059,12 @@ function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegion
               <p>As sessões pertencem aos provedores. O BrasilTvLive não armazena senhas, tokens ou cookies.</p>
             </div>
           </div>
-          {activeProviderLogin ? <ProviderLoginSurface providerId={activeProviderLogin} onClose={onCloseProviderLogin} onOpenProviderLogin={onOpenProviderLogin} providerHandoff={providerHandoff} /> : <div className="provider-account-list">
+          {activeProviderLogin ? <ProviderLoginSurface providerId={activeProviderLogin} onClose={onCloseProviderLogin} onOpenProviderLogin={onOpenProviderLogin} providerHandoff={providerHandoff} closeButtonRef={providerLoginCloseRef} actionButtonRef={providerLoginActionRef} /> : <div className="provider-account-list">
             {Object.values(accountProviders).map((provider) => <ProviderAccountCard
               key={provider.id}
               provider={provider}
               account={providerAccounts?.[provider.id]}
+              actionRef={getProviderActionRef(provider.id)}
               onConnect={onConnectProvider}
               onDisconnect={onDisconnectProvider}
             />)}
@@ -1724,10 +2073,9 @@ function RegionDialog({ region, regionSource, selectedRegionId, onSelectedRegion
         </section>}
         {locationError && <p className="region-dialog-error" role="alert">{locationError}</p>}
         <div className="region-dialog-actions">
-          <button type="button" className="region-secondary-button" onClick={onUseLocation} disabled={isLocating}>{isLocating ? 'Localizando…' : 'Usar localização'}</button>
-          <button type="button" className="region-primary-button" onClick={onSave}>Confirmar região</button>
+          <button ref={saveButtonRef} type="button" className="region-primary-button" onClick={onSave}>Confirmar região</button>
         </div>
-        {!isFirstAccess && <button type="button" className="region-close-button" onClick={onClose}>Cancelar</button>}
+        {!isFirstAccess && <button ref={closeButtonRef} type="button" className="region-close-button" onClick={onClose}>Cancelar</button>}
         {region && !isFirstAccess && <span className="region-dialog-current">Atual: {getRegionOption(region.regionId).label} · {regionSource === 'auto' ? 'Automática' : 'Manual'}</span>}
       </section>
     </div>
@@ -1805,11 +2153,13 @@ function App() {
   const providerPopupTimerRef = useRef(null);
   const providerPopupRef = useRef(null);
   const providerTargetRef = useRef(null);
+  const providerHandoffRef = useRef(null);
   const regionId = region?.regionId || regionOptions[0].regionId;
   const channels = useMemo(() => getChannelsForRegion(regionId), [regionId]);
   const remote = useTvRemoteController({
     channels,
     isWatching,
+    isModalOpen: isRegionDialogOpen,
     onChannelStep: (direction) => channelStepRef.current?.(direction),
     onVolumeStep: (delta) => volumeStepRef.current?.(delta),
     onMuteToggle: () => muteToggleRef.current?.(),
@@ -1820,10 +2170,18 @@ function App() {
   const isWatchingRef = useRef(isWatching);
   activeChannelRef.current = activeChannel;
   isWatchingRef.current = isWatching;
+  providerHandoffRef.current = providerHandoff;
   const activeProviderStatus = activeChannel?.provider
     ? providerAccounts[activeChannel.provider]?.status
     : null;
   const previousProgramRef = useRef(remote.selectedProgram);
+
+  useEffect(() => {
+    // The native Android video layer sits above the transparent WebView so it
+    // can render on Android TV 9. Hide it while a React modal is open; the
+    // modal must remain the topmost interactive surface for the remote.
+    window.AndroidBrasilTvLive?.setLiveStreamVisible?.(!isRegionDialogOpen);
+  }, [isRegionDialogOpen]);
 
   const openRegionDialog = () => {
     setRegionDraft(region?.regionId || regionOptions[0].regionId);
@@ -1847,6 +2205,16 @@ function App() {
     setRegion(nextRegion);
     setActiveChannelIndex(0);
     remote.selectProgram(0, 0);
+    // The settings item remains selected while the modal is open. Return the
+    // TV focus to the live navigation before unmounting the dialog so the
+    // effect that opens settings cannot immediately reopen it.
+    remote.selectNav(1);
+    setIsRegionDialogOpen(false);
+  };
+
+  const closeRegionDialog = () => {
+    remote.selectNav(1);
+    setActiveProviderLogin(null);
     setIsRegionDialogOpen(false);
   };
 
@@ -1876,7 +2244,9 @@ function App() {
       const nextHandoff = { providerId, channelUrl, channelName, mode: 'login', status: 'open', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
       desktop.openProviderSurface({ providerId, url: getProviderLoginUrl(providerId, channelUrl), channelUrl, channelName, mode: 'login' })
-        .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
+        .then((state) => setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
+          ? (providerTargetRef.current = { ...providerTargetRef.current, requestId: state.requestId }, { ...current, ...state, surface: 'desktop' })
+          : current))
         .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
       return;
     }
@@ -1913,10 +2283,13 @@ function App() {
     if (desktop?.isDesktop) {
       setIsWatching(watch);
       providerTargetRef.current = { providerId, channelUrl, channelName };
-      const nextHandoff = { providerId, channelUrl, channelName, mode: 'player', status: 'player', surface: 'desktop' };
+      const mode = watch ? 'watch' : 'preview';
+      const nextHandoff = { providerId, channelUrl, channelName, mode, status: watch ? 'player' : 'loading', surface: 'desktop' };
       setProviderHandoff(nextHandoff);
-      desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName, mode: 'player' })
-        .then((state) => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, ...state, surface: 'desktop' } : current))
+      desktop.openProviderSurface({ providerId, url: channelUrl, channelUrl, channelName, mode })
+        .then((state) => setProviderHandoff((current) => current?.providerId === providerId && current?.channelUrl === channelUrl
+          ? (providerTargetRef.current = { ...providerTargetRef.current, requestId: state.requestId }, { ...current, ...state, surface: 'desktop' })
+          : current))
         .catch(() => setProviderHandoff((current) => current?.providerId === providerId ? { ...current, status: 'error', surface: 'desktop' } : current));
       return;
     }
@@ -1958,9 +2331,15 @@ function App() {
     const channelUrl = activeChannel.providerUrl || accountProviders[activeChannel.provider]?.fallbackUrl;
     if (!channelUrl) return;
     const currentTarget = providerTargetRef.current;
-    if (currentTarget?.providerId === activeChannel.provider
-      && currentTarget.channelUrl === channelUrl
-      && currentTarget.channelName === activeChannel.name) return;
+    if (currentTarget?.providerId === activeChannel.provider && currentTarget.channelUrl === channelUrl) {
+      if (currentTarget.channelName !== activeChannel.name) {
+        providerTargetRef.current = { ...currentTarget, channelName: activeChannel.name };
+        setProviderHandoff((current) => current?.providerId === activeChannel.provider && current.channelUrl === channelUrl
+          ? { ...current, channelName: activeChannel.name }
+          : current);
+      }
+      return;
+    }
 
     openProviderChannel({
       providerId: activeChannel.provider,
@@ -1987,7 +2366,8 @@ function App() {
     }
     if (channel.playbackType === 'provider') {
       const connected = providerAccounts[channel.provider]?.status === PROVIDER_STATUS.CONNECTED;
-      setPreviewStatus(connected ? 'loading' : 'auth-required');
+      const channelUrl = channel.providerUrl || accountProviders[channel.provider]?.fallbackUrl;
+      setPreviewStatus(getProviderPreviewStatus({ connected, channelUrl, handoff: providerHandoff }));
       return undefined;
     }
 
@@ -1996,7 +2376,7 @@ function App() {
       if (activeChannelRef.current?.id === channel.id && !isWatchingRef.current) setPreviewStatus('error');
     }, PREVIEW_LOAD_TIMEOUT_MS);
     return () => window.clearTimeout(previewTimeoutRef.current);
-  }, [activeChannel?.id, activeChannel?.playbackType, activeChannel?.provider, providerAccounts]);
+  }, [activeChannel?.id, activeChannel?.playbackType, activeChannel?.provider, activeChannel?.providerUrl, providerAccounts, providerHandoff?.providerId, providerHandoff?.channelUrl, providerHandoff?.mode, providerHandoff?.status]);
 
   useEffect(() => {
     const channel = activeChannel;
@@ -2013,9 +2393,8 @@ function App() {
     if (!desktop?.isDesktop || !activeChannel?.provider || !accountProviders[activeChannel.provider]?.desktopSurface || providerHandoff?.surface !== 'desktop') return;
     const isOpen = ['open', 'loading', 'ready', 'player', 'auth-required'].includes(providerHandoff.status);
     if (!isOpen) return;
-    const shouldPreviewBehindApp = providerHandoff.status === 'player' && providerHandoff.mode !== 'login' && !isWatching;
-    desktop.setProviderLayer?.(shouldPreviewBehindApp ? 'background' : 'foreground');
-  }, [activeChannel?.provider, isWatching, providerHandoff?.status, providerHandoff?.surface]);
+    desktop.setProviderLayer?.(getProviderLayer({ mode: providerHandoff.mode, isWatching }));
+  }, [activeChannel?.provider, isWatching, providerHandoff?.mode, providerHandoff?.status, providerHandoff?.surface]);
 
   const handleProviderDisconnect = (providerId) => {
     setProviderAccounts((currentAccounts) => {
@@ -2144,12 +2523,28 @@ function App() {
 
   const stopViewing = () => {
     window.clearTimeout(playerTimeoutRef.current);
+    const desktop = getDesktopBridge();
+    const isProviderViewing = desktop?.isDesktop && activeChannel?.playbackType === 'provider'
+      && providerHandoff?.surface === 'desktop';
     setIsWatching(false);
     setIsPlayerLoading(false);
     setPlayerError(false);
     setShowChannelNotice(false);
     window.clearTimeout(channelNoticeTimerRef.current);
     if (heroVideoRef.current) heroVideoRef.current.muted = true;
+    if (isProviderViewing) {
+      if (providerHandoff?.mode === 'login') {
+        providerTargetRef.current = null;
+        desktop.closeProviderSurface?.();
+        setProviderHandoff(null);
+        setPreviewStatus('auth-required');
+      } else {
+        desktop.setProviderLayer?.('background');
+        desktop.setProviderAudioMuted?.(true);
+        setProviderHandoff((current) => current ? { ...current, mode: 'preview', status: 'player' } : current);
+        setPreviewStatus(providerAccounts[activeChannel.provider]?.status === PROVIDER_STATUS.CONNECTED ? 'playing' : 'auth-required');
+      }
+    }
     const exit = document.fullscreenElement ? document.exitFullscreen?.() : undefined;
     exit?.catch(() => {});
   };
@@ -2174,11 +2569,17 @@ function App() {
         setIsPlayerLoading(false);
         setShowChannelNotice(false);
         if (heroVideoRef.current) heroVideoRef.current.muted = true;
+        const desktop = getDesktopBridge();
+        if (desktop?.isDesktop && activeChannel?.playbackType === 'provider' && providerHandoff?.surface === 'desktop') {
+          desktop.setProviderLayer?.('background');
+          desktop.setProviderAudioMuted?.(true);
+          setPreviewStatus(providerAccounts[activeChannel.provider]?.status === PROVIDER_STATUS.CONNECTED ? 'playing' : 'auth-required');
+        }
       }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [isWatching]);
+  }, [activeChannel?.playbackType, activeChannel?.provider, isWatching, providerAccounts, providerHandoff?.surface]);
 
   useEffect(() => {
     if (!isWatching) return undefined;
@@ -2234,32 +2635,43 @@ function App() {
       }
       if (!event?.providerId) return;
       const providerTarget = providerTargetRef.current;
-      const isCurrentProviderTarget = event.providerId === providerTarget?.providerId
-        && (!event.channelUrl || event.channelUrl === providerTarget?.channelUrl)
-        && (!event.channelName || event.channelName === providerTarget?.channelName);
-      if (isCurrentProviderTarget && event.channelUrl && ['auth-required', 'loading', 'player'].includes(event.status)) {
-        const requestedChannelIndex = channels.findIndex((channel) => channel.provider === event.providerId
-          && (event.channelName ? channel.name === event.channelName : channel.providerUrl === event.channelUrl));
+      const isProviderBack = (event.status === 'closed' || event.reason === 'back')
+        && (isCurrentProviderTarget(event, providerTarget)
+          || providerHandoffRef.current?.providerId === event.providerId);
+      if (isProviderBack) {
+        setIsWatching(false);
+        setIsPlayerLoading(false);
+        setShowChannelNotice(false);
+        setPlayerError(false);
+        setProviderHandoff((current) => current
+          ? { ...current, ...event, status: 'closed', surface: 'desktop' }
+          : current);
+        return;
+      }
+      const stateEvent = normalizeProviderEvent({
+        event,
+        target: providerTarget,
+        handoff: providerHandoffRef.current,
+        isWatching: isWatchingRef.current,
+      });
+      if (!stateEvent) return;
+      if (event.requestId && !providerTarget?.requestId) {
+        providerTargetRef.current = { ...providerTarget, requestId: event.requestId };
+      }
+      if (stateEvent.channelUrl && ['auth-required', 'loading', 'player'].includes(stateEvent.status)) {
+        const requestedChannelIndex = channels.findIndex((channel) => channel.provider === stateEvent.providerId
+          && (stateEvent.channelName ? channel.name === stateEvent.channelName : channel.providerUrl === stateEvent.channelUrl));
         if (requestedChannelIndex >= 0 && requestedChannelIndex !== activeChannelIndex) {
           setActiveChannelIndex(requestedChannelIndex);
           remote.selectProgram(requestedChannelIndex, 0);
         }
       }
-      if (isCurrentProviderTarget && event.reason === 'oauth-closed' && providerTarget?.channelUrl) {
-        openProviderChannel({
-          providerId: providerTarget.providerId,
-          channelUrl: providerTarget.channelUrl,
-          channelName: providerTarget.channelName,
-          watch: false,
-        });
-        return;
-      }
-      if (event.status === 'player') {
+      if (stateEvent.status === 'player') {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,
-            [event.providerId]: {
-              ...(currentAccounts[event.providerId] || {}),
+            [stateEvent.providerId]: {
+              ...(currentAccounts[stateEvent.providerId] || {}),
               status: PROVIDER_STATUS.CONNECTED,
               lastVerifiedAt: new Date().toISOString(),
             },
@@ -2268,15 +2680,24 @@ function App() {
           return nextAccounts;
         });
       }
-      if (event.status === 'auth-required') {
+      if (stateEvent.status === 'auth-required') {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,
-            [event.providerId]: { status: PROVIDER_STATUS.DISCONNECTED },
+            [stateEvent.providerId]: { status: PROVIDER_STATUS.DISCONNECTED },
           };
           writeStoredProviderAccounts(nextAccounts);
           return nextAccounts;
         });
+      }
+      if (shouldResumeProviderChannel({ ...stateEvent, channelUrl: providerTarget?.channelUrl })) {
+        openProviderChannel({
+          providerId: providerTarget.providerId,
+          channelUrl: providerTarget.channelUrl,
+          channelName: providerTarget.channelName,
+          watch: true,
+        });
+        return;
       }
       if (event.status === 'closed' || event.reason === 'back') {
         setIsWatching(false);
@@ -2284,17 +2705,20 @@ function App() {
         setShowChannelNotice(false);
         setPlayerError(false);
       }
-      if (isCurrentProviderTarget && event.status === 'hidden' && event.reason === 'back') {
+      if (event.reason === 'back' && stateEvent.status === 'player') {
+        setPreviewStatus(providerAccounts[event.providerId]?.status === PROVIDER_STATUS.CONNECTED ? 'playing' : 'auth-required');
+      }
+      if (stateEvent.status === 'hidden' && event.reason === 'back') {
         setPreviewStatus('auth-required');
       }
       setProviderHandoff((current) => ({
         ...(current || {}),
-        ...event,
-        mode: event.status === 'player' ? 'player' : event.mode || current?.mode,
+        ...stateEvent,
+        mode: stateEvent.mode || current?.mode,
         surface: 'desktop',
       }));
     });
-  }, [activeChannelIndex, channels, isMobile, region?.regionId]);
+  }, [activeChannelIndex, channels, isMobile, providerAccounts, region?.regionId]);
 
   useEffect(() => {
     const desktop = getDesktopBridge();
@@ -2355,7 +2779,7 @@ function App() {
       {isMobile ? <MobileApp channels={channels} activeChannelIndex={activeChannelIndex} onSelectChannel={selectChannel} onChannelStep={stepChannel} onOpenRegion={openRegionDialog} onPlaybackReady={handlePlaybackReady} onPlaybackError={handlePlaybackError} providerAccounts={providerAccounts} onOpenAccounts={openRegionDialog} /> : (
         <main className={`tv-shell ${isWatching ? 'watching' : ''} ${isWatching && isPlayerLoading ? 'watch-loading' : ''} ${activeChannel?.playbackType === 'provider' && providerHandoff?.surface === 'desktop' && providerHandoff?.status === 'player' && !isWatching ? 'provider-preview' : ''}`}>
           <Sidebar
-            focusedNav={remote.focusArea === 'nav' ? remote.focusedNav : -1}
+            focusedNav={!isRegionDialogOpen && remote.focusArea === 'nav' ? remote.focusedNav : -1}
             selectedNav={remote.selectedNav}
             onFocus={remote.setFocusedNav}
             onSelect={handleNavigationSelect}
@@ -2386,7 +2810,7 @@ function App() {
             <Epg
               channels={channels}
               providerAccounts={providerAccounts}
-              isFocused={remote.focusArea === 'epg'}
+              isFocused={!isRegionDialogOpen && remote.focusArea === 'epg'}
               focusedRow={remote.focusedRow}
               focusedCol={remote.focusedCol}
               selectedProgram={remote.selectedProgram}
@@ -2406,7 +2830,7 @@ function App() {
         onUseLocation={useDeviceLocation}
         isLocating={isLocating}
         locationError={locationError}
-        onClose={() => setIsRegionDialogOpen(false)}
+        onClose={closeRegionDialog}
         isFirstAccess={!region}
         providerAccounts={providerAccounts}
         onConnectProvider={handleProviderConnect}

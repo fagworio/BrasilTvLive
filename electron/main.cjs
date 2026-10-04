@@ -32,6 +32,7 @@ let providerState = null;
 let lastProviderBounds = null;
 let providerLayer = 'foreground';
 let providerFullscreenTimer = null;
+let providerRequestId = 0;
 
 function sendProviderState(nextState) {
   providerState = nextState;
@@ -62,7 +63,7 @@ function applyProviderVideoPresentation() {
 
 function requestGloboplayPlayerFullscreen(attempt = 0) {
   if (!providerView || providerView.webContents.isDestroyed()) return;
-  if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
+  if (providerState?.providerId !== 'globoplay' || !['watch', 'player'].includes(providerState?.mode)) return;
   globoplayProvider.requestPlayerFullscreen(providerView.webContents, providerState, (nextAttempt) => {
     providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(nextAttempt), 350);
   }, attempt);
@@ -70,7 +71,7 @@ function requestGloboplayPlayerFullscreen(attempt = 0) {
 
 function scheduleProviderPlayerFullscreen() {
   clearProviderFullscreenTimer();
-  if (providerState?.providerId !== 'globoplay' || providerState?.mode !== 'player') return;
+  if (providerState?.providerId !== 'globoplay' || !['watch', 'player'].includes(providerState?.mode)) return;
   providerFullscreenTimer = setTimeout(() => requestGloboplayPlayerFullscreen(), 250);
 }
 
@@ -189,6 +190,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
     console.warn(`[provider] blocked request for ${providerId || 'unknown'}: ${validation.reason}`);
     return { status: 'error', reason: validation.reason };
   }
+  const requestId = ++providerRequestId;
 
   const isSameProvider = providerState?.providerId === providerId;
   if (!providerView || !isSameProvider) {
@@ -202,6 +204,7 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
         sandbox: true,
       },
     });
+    const view = providerView;
     mainWindow.contentView.addChildView(providerView);
     applyProviderBounds({ visible: false });
     const createProviderWindowOptions = () => ({
@@ -260,9 +263,11 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
       console.log(`[${providerId}] ${sourceId}:${line} ${message}`);
     });
     providerView.webContents.on('did-start-loading', () => {
+      if (providerView !== view) return;
       sendProviderState({ ...(providerState || {}), providerId, status: 'loading' });
     });
     providerView.webContents.on('did-stop-loading', () => {
+      if (providerView !== view) return;
       const currentUrl = providerView.webContents.getURL();
       const isLogin = isProviderLoginUrl(providerId, currentUrl);
       const isPlayer = isProviderPlayerUrl(providerId, currentUrl, providerState?.channelUrl);
@@ -278,10 +283,12 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
       });
     });
     providerView.webContents.on('did-finish-load', () => {
+      if (providerView !== view) return;
       applyProviderVideoPresentation();
       scheduleProviderPlayerFullscreen();
     });
     const handleProviderNavigation = (_event, navigatedUrl) => {
+      if (providerView !== view) return;
       const isPlayer = isProviderPlayerUrl(providerId, navigatedUrl, providerState?.channelUrl);
       const isHome = isProviderHomeUrl(providerId, navigatedUrl);
       const isLogin = isProviderLoginUrl(providerId, navigatedUrl);
@@ -300,16 +307,20 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
     providerView.webContents.on('did-navigate', handleProviderNavigation);
     providerView.webContents.on('did-navigate-in-page', handleProviderNavigation);
     providerView.webContents.on('did-redirect-navigation', (_event, navigatedUrl) => {
+      if (providerView !== view) return;
       sendProviderState({ ...(providerState || {}), providerId, currentUrl: navigatedUrl });
     });
     providerView.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+      if (providerView !== view) return;
       if (!isMainFrame || errorCode === -3) return;
       sendProviderState({ ...(providerState || {}), providerId, status: 'error', errorCode, errorDescription, currentUrl: validatedUrl });
     });
     providerView.webContents.on('render-process-gone', (_event, details) => {
+      if (providerView !== view) return;
       sendProviderState({ ...(providerState || {}), providerId, status: 'error', reason: `render-process-gone:${details.reason}` });
     });
     providerView.webContents.on('before-input-event', (event, input) => {
+      if (providerView !== view) return;
       const isBack = input.type === 'keyDown' && ['Escape', 'Backspace', 'BrowserBack', 'GoBack', 'Back'].includes(input.key);
       if (isBack) {
         event.preventDefault();
@@ -329,10 +340,10 @@ function attachProviderView({ providerId, url, channelUrl, channelName, mode = '
 
   applyProviderBounds({ visible: false });
   clearProviderFullscreenTimer();
-  providerState = { providerId, channelUrl, channelName, mode, status: mode === 'player' && isProviderPlayerUrl(providerId, url, channelUrl) ? 'player' : 'open' };
+  providerState = { providerId, channelUrl, channelName, mode, requestId, status: ['watch', 'player'].includes(mode) && isProviderPlayerUrl(providerId, url, channelUrl) ? 'player' : 'open' };
+  setProviderLayer(mode === 'login' || ['watch', 'player'].includes(mode) ? 'foreground' : 'background');
   providerView.webContents.loadURL(url);
-  if (providerId === 'globoplay' && mode === 'player') scheduleProviderPlayerFullscreen();
-  focusProviderView();
+  if (providerId === 'globoplay' && ['watch', 'player'].includes(mode)) scheduleProviderPlayerFullscreen();
   sendProviderState(providerState);
   return providerState;
 }
