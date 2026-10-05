@@ -12,6 +12,8 @@ import java.util.List;
  * It deliberately describes capabilities and trusted origins only. Provider
  * OAuth parameters, cookies and tokens remain exclusively with the official
  * provider page opened in Custom Tabs/the system browser.
+ * Keep social capabilities aligned with src/providerAuth.js, which is the
+ * corresponding UX contract in the React shell.
  */
 public final class ProviderAuthConfig {
     public enum PairingCapability { UNKNOWN }

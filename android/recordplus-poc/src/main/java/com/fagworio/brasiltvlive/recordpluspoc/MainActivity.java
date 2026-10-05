@@ -788,6 +788,7 @@ public final class MainActivity extends Activity {
     }
 
     private String buildProviderCompatibilityHtml(String providerId, String channelName, String providerUrl) {
+        ProviderAuthConfig authConfig = ProviderAuthConfig.forId(providerId);
         String provider = "globoplay".equals(providerId) ? "Globo" : "Record+";
         String brand = "globoplay".equals(providerId) ? "globoplay" : "recordplus";
         String escapedProviderUrl = escapeHtml(providerUrl);
@@ -811,18 +812,32 @@ public final class MainActivity extends Activity {
             html.append("<p class='subtitle'>A autenticação acontece somente na página oficial da Conta Globo.</p>")
                     .append("<button class='primary' onclick=\"openOfficial('password')\">Abrir login oficial</button>")
                     .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou escolha uma opção na página oficial:</p>")
-                    .append("<div class='socials'><button class='social' onclick=\"openOfficial('social')\">G&nbsp;&nbsp; Continuar com Google</button><button class='social' onclick=\"openOfficial('social')\">f&nbsp;&nbsp; Continuar com Facebook</button></div>")
+                    .append(buildProviderSocialButtons(authConfig))
                     .append("<div class='globo-card'><h2>Por que ter uma Conta Globo?</h2><p>✓ A Conta Globo é gratuita, basta se cadastrar e acessar.</p><p>✓ Use o mesmo login para todos os produtos Globo e parceiros.</p></div>");
         } else {
             html.append("<p class='subtitle'>Escolha uma opção para abrir o login oficial do RecordPlus. Os campos de e-mail e senha serão exibidos pelo próprio provedor.</p>")
                     .append("<button class='primary' onclick=\"openOfficial('password')\">Abrir login oficial</button>")
                     .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou abra o login social oficial:</p>")
-                    .append("<div class='socials'><button class='social' onclick=\"openOfficial('social')\">G&nbsp;&nbsp; Continuar com Google</button><button class='social' onclick=\"openOfficial('social')\">●&nbsp;&nbsp; Continuar com Apple</button></div>");
+                    .append(buildProviderSocialButtons(authConfig));
         }
         html.append("<div class='notice'><strong>Login oficial ").append(provider).append("</strong>").append(providerNotice).append("<br><br>").append(socialNote).append("</div>")
                 .append("<button class='secondary' onclick=\"AndroidBrasilTvLive.closeProviderSurface()\">Voltar para os canais</button>")
                 .append("</main><script>var providerUrl='").append(escapeJavaScript(providerUrl)).append("';function openOfficial(mode){if(mode==='password'){AndroidBrasilTvLive.openProviderInternal(providerUrl);}else{AndroidBrasilTvLive.openProviderExternal(providerUrl);}}</script></body></html>");
         return html.toString();
+    }
+
+    private String buildProviderSocialButtons(ProviderAuthConfig authConfig) {
+        if (authConfig == null || authConfig.socialProviders().isEmpty()) return "";
+        StringBuilder buttons = new StringBuilder("<div class='socials'>");
+        for (String socialProvider : authConfig.socialProviders()) {
+            String mark = "google".equals(socialProvider) ? "G" : "facebook".equals(socialProvider) ? "f" : "●";
+            String label = "google".equals(socialProvider) ? "Google"
+                    : "facebook".equals(socialProvider) ? "Facebook" : "Apple";
+            buttons.append("<button class='social' onclick=\"openOfficial('social')\">")
+                    .append(mark).append("&nbsp;&nbsp; Continuar com ").append(label)
+                    .append("</button>");
+        }
+        return buttons.append("</div>").toString();
     }
 
     private String escapeHtml(String value) {

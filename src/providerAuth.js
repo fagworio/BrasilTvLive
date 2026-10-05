@@ -1,3 +1,5 @@
+// Keep social capabilities aligned with ProviderAuthConfig.java, the Android
+// security allowlist. This file controls UX only and never carries credentials.
 const PROVIDER_AUTH_CAPABILITIES = Object.freeze({
   recordplus: Object.freeze({
     browser: true,
@@ -21,4 +23,3 @@ export function getProviderAuthCapabilities(providerId) {
 export function supportsProviderBrowserAuth(providerId) {
   return getProviderAuthCapabilities(providerId)?.browser === true;
 }
-

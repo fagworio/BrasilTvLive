@@ -2320,6 +2320,22 @@ function App() {
   };
 
   const openProviderChannel = ({ providerId, channelUrl, channelName, watch = true, browser = false }) => {
+    if (browser && !supportsProviderBrowserAuth(providerId)) {
+      setIsWatching(false);
+      providerTargetRef.current = { providerId, channelUrl, channelName };
+      setProviderHandoff({
+        providerId,
+        channelUrl,
+        channelName,
+        mode: 'browser-player',
+        status: 'browser-unavailable',
+        reason: 'browser-not-supported',
+        sessionSurface: 'browser',
+        surface: 'desktop',
+      });
+      setAccountNotice(`O navegador seguro ainda não está disponível para ${accountProviders[providerId]?.label || 'este provedor'}.`);
+      return;
+    }
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
       if (browser && desktop.openProviderInBrowser) {
