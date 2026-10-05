@@ -2708,6 +2708,13 @@ function App() {
     closeDesktopProviderForChannel(channels[index]);
     setActiveChannelIndex(index);
     remote.selectProgram(index, 0);
+    const selectedChannel = channels[index];
+    // On touch devices a tap is the explicit channel-selection gesture. A
+    // protected provider channel must therefore open its official login
+    // surface rather than leaving the mobile player on an inert preview.
+    if (isMobile && selectedChannel?.playbackType === 'provider' && isDesktopProviderChannel(selectedChannel)) {
+      startViewing(index);
+    }
   };
 
   const stepChannel = (direction) => {

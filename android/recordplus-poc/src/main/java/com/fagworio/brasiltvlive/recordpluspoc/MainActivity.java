@@ -332,6 +332,19 @@ public final class MainActivity extends Activity {
             providerState.put("authVerified", false);
             providerState.put("playerRouteStable", false);
             sendProviderState(providerState);
+
+            // A phone has a compatible browser available through Custom Tabs.
+            // Provider login must use that browser: RecordPlus and Google
+            // authentication intentionally reject embedded Android WebViews.
+            // Android TV retains its remote-friendly compatibility surface
+            // below, where an external browser may not be installed.
+            if (!isTelevisionDevice() && "login".equals(mode)) {
+                providerVisible = false;
+                providerWebView.setVisibility(View.GONE);
+                openProviderInSecureBrowser(Uri.parse(url), "login oficial");
+                return;
+            }
+
             // Android TV login must use the deterministic TV form. Provider
             // login SPAs can remain on an endless loader even when the TV has
             // a newer WebView, while the official player still needs the
