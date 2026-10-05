@@ -15,7 +15,7 @@ test('describes only verified browser capabilities for each provider', () => {
   assert.deepEqual(getProviderAuthCapabilities('globoplay'), {
     browser: true,
     pairing: 'unknown',
-    social: ['google', 'facebook'],
+    social: ['google'],
   });
   assert.equal(supportsProviderBrowserAuth('recordplus'), true);
   assert.equal(supportsProviderBrowserAuth('globoplay'), true);

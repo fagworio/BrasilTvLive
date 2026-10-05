@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   getProviderLayer,
   getProviderPreviewStatus,
+  isVerifiedProviderPlayer,
   isCurrentProviderTarget,
   isProviderFullscreenMode,
   normalizeProviderEvent,
@@ -55,6 +56,23 @@ test('keeps the selected channel name when a same-url event arrives late', () =>
     isWatching: false,
   });
   assert.equal(state.channelName, 'Globo Minas');
+});
+
+test('does not treat an external browser return as a verified provider session', () => {
+  assert.equal(isVerifiedProviderPlayer({
+    status: 'external-auth-returned-unverified',
+    sessionSurface: 'browser',
+  }, true), false);
+  assert.equal(isVerifiedProviderPlayer({
+    status: 'player',
+    sessionSurface: 'browser',
+    playerRouteStable: true,
+  }, true), false);
+  assert.equal(isVerifiedProviderPlayer({
+    status: 'player',
+    sessionSurface: 'webview',
+    playerRouteStable: true,
+  }, true), true);
 });
 
 test('preserves the background player after Escape against a delayed loading event', () => {

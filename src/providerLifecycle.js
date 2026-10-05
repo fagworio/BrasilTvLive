@@ -30,6 +30,11 @@ export function normalizeProviderEvent({ event, target, handoff, isWatching }) {
   return { ...normalized, mode: normalized.mode || handoff?.mode };
 }
 
+export function isVerifiedProviderPlayer(state, hasNativeBridge = false) {
+  return state?.status === 'player'
+    && (!hasNativeBridge || (state.sessionSurface === 'webview' && state.playerRouteStable === true));
+}
+
 export function getProviderPreviewStatus({ connected, channelUrl, handoff }) {
   const sameReadyTarget = connected
     && handoff?.channelUrl === channelUrl

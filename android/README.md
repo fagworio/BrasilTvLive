@@ -4,13 +4,13 @@ Esta surface nativa é o ponto de integração do RecordPlus para Android e Andr
 
 ## Comportamento
 
-- O shell do BrasilTvLive abre `MainActivity` com `EXTRA_CHANNEL_URL` e `EXTRA_CHANNEL_NAME` do canal escolhido.
-- A surface abre o login oficial com `redirectTo` para o mesmo canal. Depois da autenticação, o RecordPlus retorna ao player selecionado, sem redirecionar para outro canal.
-- A surface ocupa a tela inteira em Android e Android TV; o vídeo oficial usa preenchimento `cover` e os controles de áudio, fullscreen, anúncios e navegação continuam sendo do RecordPlus.
-- Cookies são mantidos exclusivamente pelo `CookieManager` nativo da WebView e recebem `flush()` em pausa, parada, encerramento e após o carregamento de páginas.
-- O código não lê, exporta ou copia cookies, tokens ou credenciais para o BrasilTvLive, `localStorage` próprio ou backend.
-- URLs de `accounts.google.com` são encaminhadas ao navegador externo. A POC registra que Google OAuth exige navegador/Custom Tab em vez de forçar o fluxo dentro da WebView.
-- Back/Esc encerra o player e devolve o controle ao shell quando o canal já está reproduzindo; durante o login, Back ainda navega no histórico da WebView.
+- O shell do BrasilTvLive mantém a navegação e abre uma tela de login acessível por controle remoto para RecordPlus e Conta Globo.
+- O botão de login oficial abre uma Custom Tab ou navegador compatível. Login, provedores sociais e sessão ficam na superfície oficial do provedor; Android TV 9 não depende do WebView antigo para autenticar.
+- A URL oficial recebe o canal selecionado como destino. O retorno do navegador não é tratado como login verificado; o usuário pode continuar no navegador e a sessão permanece sob controle do provedor.
+- O Android System WebView sozinho não abre páginas externas. Se não houver navegador compatível, o app mostra uma mensagem e preserva a tela de login para permitir nova tentativa.
+- O BrasilTvLive não lê, exporta ou copia cookies, tokens ou credenciais para o shell, `localStorage` próprio ou backend.
+- A superfície oficial do player continua responsável pelo vídeo, áudio, fullscreen, anúncios e navegação.
+- Back/Esc devolve o controle ao shell; fechar ou retornar do navegador não marca por si só a conta como conectada.
 - `CH+`, `CH-`, `MEDIA_NEXT` e `MEDIA_PREVIOUS` encerram a surface com `EXTRA_CHANNEL_DIRECTION=next|previous` para o shell trocar de canal.
 - Fullscreen do player é tratado por `WebChromeClient`; áudio, anúncios e controles permanecem sob responsabilidade do provider.
 
@@ -23,18 +23,18 @@ Intent intent = new Intent(context, MainActivity.class)
 startActivityForResult(intent, RECORDPLUS_REQUEST_CODE);
 ```
 
-Ao receber o resultado, o shell deve continuar exibindo sua lista e, quando `EXTRA_CHANNEL_DIRECTION` estiver presente, selecionar o canal seguinte/anterior. A sessão permanece na WebView nativa e não precisa de novo login enquanto o CookieManager do aplicativo estiver válido.
+Ao receber o resultado, o shell deve continuar exibindo sua lista e, quando `EXTRA_CHANNEL_DIRECTION` estiver presente, selecionar o canal seguinte/anterior. O login deste fluxo ocorre no navegador externo; o app não importa cookies nem presume que a sessão do navegador estará disponível na WebView. O provedor pode reaproveitar a sessão quando o usuário escolher “Continuar no navegador”.
 
 ## Validação no dispositivo
 
 1. Compile e instale a aplicação em um Android ou Android TV com WebView/Chrome atualizado.
 2. Abra `MainActivity` com `EXTRA_CHANNEL_URL` apontando para RECORD Nacional, RECORD Minas ou RECORD News.
-3. Teste primeiro uma conta RecordPlus com login próprio, se o provider oferecer esse fluxo.
-4. Confirme a reprodução real do canal selecionado.
-5. Feche e reabra a aplicação; confirme se a sessão RecordPlus foi restaurada.
-6. Teste Back/Esc, CH+/CH-, áudio, fullscreen, anúncios e foco dos controles do provider.
-7. Repita com `Entrar com Google`. Se o fluxo sair para o navegador ou retornar `disallowed_useragent`, registre o Google OAuth como restrição do provider para WebView.
+3. Abra o login oficial, conclua a autenticação no navegador e confirme que o destino é o canal escolhido.
+4. Retorne ao BrasilTvLive e use “Continuar no navegador”; confirme se o provedor reutiliza a sessão e abre o canal.
+5. Repita com Globo e RecordPlus, usando os métodos de login disponíveis na página oficial de cada provedor.
+6. Teste D-pad, Enter, Back/Esc, a mensagem de navegador ausente e a preservação do canal selecionado.
+7. Confirme que retornar do navegador não marca por si só a conta como conectada.
 
-## Limitação deste ambiente
+## Estado da validação local
 
-O checkout atual não possui Android SDK, Gradle, `adb` ou emulador disponíveis. Por isso a compilação do APK e os testes de login/reprodução em dispositivo ainda precisam ser executados em uma máquina Android configurada. A implementação foi mantida sem dependências externas para facilitar essa execução.
+Este ambiente possui Android SDK, Gradle, `adb` e AVDs Phone/Android TV. A compilação e os testes de navegação podem ser executados localmente; autenticação completa e reprodução ainda dependem de uma conta válida, dos métodos oferecidos pelo provedor e de confirmação no dispositivo-alvo. Um retorno do navegador, isoladamente, não confirma a autenticação.

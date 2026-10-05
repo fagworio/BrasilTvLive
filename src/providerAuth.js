@@ -12,7 +12,7 @@ const PROVIDER_AUTH_CAPABILITIES = Object.freeze({
     browser: true,
     // No official Globo pairing/device flow has been verified yet.
     pairing: 'unknown',
-    social: Object.freeze(['google', 'facebook']),
+    social: Object.freeze(['google']),
   }),
 });
 

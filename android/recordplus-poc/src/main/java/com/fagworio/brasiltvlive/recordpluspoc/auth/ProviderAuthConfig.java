@@ -43,8 +43,8 @@ public final class ProviderAuthConfig {
             return new ProviderAuthConfig(
                     "globoplay",
                     Arrays.asList("globoplay.globo.com", "login.globo.com", "conta.globo.com"),
-                    Arrays.asList("accounts.google.com", "facebook.com"),
-                    Arrays.asList("google", "facebook"));
+                    Collections.singletonList("accounts.google.com"),
+                    Collections.singletonList("google"));
         }
         return null;
     }

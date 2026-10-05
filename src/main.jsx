@@ -4,6 +4,7 @@ import Hls from 'hls.js';
 import {
   getProviderLayer,
   getProviderPreviewStatus,
+  isVerifiedProviderPlayer,
   isCurrentProviderTarget,
   normalizeProviderEvent,
   shouldResumeProviderChannel,
@@ -1012,9 +1013,11 @@ function ProviderSurface({ channel, account, className, isWatching = false, onOp
               : providerHandoff.status === 'browser-opening'
                 ? `Abrindo ${channel.name} no navegador seguro…`
               : providerHandoff.status === 'browser-opened'
-                ? `${channel.name} foi aberto no navegador seguro; a sessão continua fora do BrasilTvLive.`
+                ? providerHandoff.mode === 'login'
+                  ? `O login oficial de ${provider.label} foi aberto no navegador. Conclua o acesso por lá e volte ao BrasilTvLive. Se a página ficar em branco ou carregando, atualize o navegador da TV.`
+                  : `${channel.name} foi aberto no navegador seguro; a sessão continua fora do BrasilTvLive.`
               : providerHandoff.status === 'browser-unavailable'
-                ? 'Não foi possível abrir um navegador compatível nesta TV. Instale ou atualize um navegador com suporte a Chrome Custom Tabs e tente novamente.'
+                ? 'Não foi possível abrir um navegador compatível nesta TV. Instale ou atualize o Chrome ou outro navegador para Android TV e tente novamente.'
               : providerHandoff.status === 'external-auth-returned-unverified'
                 ? `O navegador retornou. O BrasilTvLive não consegue confirmar o login externo; reabra ${channel.name} no navegador seguro para continuar.`
               : providerHandoff.status === 'auth-required'
@@ -1102,9 +1105,9 @@ function ProviderLoginSurface({ providerId, onClose, onOpenProviderLogin, provid
               : providerHandoff.status === 'browser-opening'
                 ? 'Abrindo o navegador seguro…'
               : providerHandoff.status === 'browser-opened'
-                ? `O navegador seguro foi aberto para ${provider.label}.`
+                ? `O navegador foi aberto para ${provider.label}. Se a página ficar em branco ou carregando, atualize o navegador da TV.`
               : providerHandoff.status === 'browser-unavailable'
-                ? 'Não foi possível abrir um navegador compatível nesta TV. Instale ou atualize um navegador com suporte a Chrome Custom Tabs e tente novamente.'
+                ? 'Não foi possível abrir um navegador compatível nesta TV. Instale ou atualize o Chrome ou outro navegador para Android TV e tente novamente.'
               : providerHandoff.status === 'external-auth-returned-unverified'
                 ? `O navegador retornou, mas o login externo não foi verificado. Reabra o canal no navegador para continuar.`
                 : 'O popup foi bloqueado; use a nova aba para continuar.'}
@@ -2787,9 +2790,7 @@ function App() {
           remote.selectProgram(requestedChannelIndex, 0);
         }
       }
-      const isStableAndroidWebViewPlayer = !window.AndroidBrasilTvLive
-        || (stateEvent.sessionSurface === 'webview' && stateEvent.playerRouteStable === true);
-      if (stateEvent.status === 'player' && isStableAndroidWebViewPlayer) {
+      if (isVerifiedProviderPlayer(stateEvent, Boolean(window.AndroidBrasilTvLive))) {
         setProviderAccounts((currentAccounts) => {
           const nextAccounts = {
             ...currentAccounts,

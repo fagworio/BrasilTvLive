@@ -749,6 +749,9 @@ public final class MainActivity extends Activity {
                 providerState.put("playerRouteStable", false);
                 sendProviderState(providerState);
             }
+            providerVisible = false;
+            if (providerWebView != null) providerWebView.setVisibility(View.GONE);
+            if (appWebView != null) appWebView.requestFocus(View.FOCUS_FORWARD);
             return true;
         } catch (ActivityNotFoundException | SecurityException exception) {
             Log.w(TAG, "Could not open secure provider auth surface", exception);
@@ -767,8 +770,8 @@ public final class MainActivity extends Activity {
                 .setTitle("Navegador necessário")
                 .setMessage("Para concluir o " + flowLabel
                         + ", esta TV precisa de um navegador compatível instalado. "
-                        + "Instale ou atualize um navegador com suporte a Chrome Custom Tabs e tente novamente. "
-                        + "O Android System WebView sozinho não conclui login social.")
+                        + "Instale ou atualize o Chrome ou outro navegador para Android TV e tente novamente. "
+                        + "O Android System WebView sozinho não abre páginas externas.")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -801,19 +804,16 @@ public final class MainActivity extends Activity {
     }
 
     private String buildProviderCompatibilityHtml(String providerId, String channelName, String providerUrl) {
-        ProviderAuthConfig authConfig = ProviderAuthConfig.forId(providerId);
         String provider = "globoplay".equals(providerId) ? "Globo" : "Record+";
         String brand = "globoplay".equals(providerId) ? "globoplay" : "recordplus";
         String escapedProviderUrl = escapeHtml(providerUrl);
-        String socialNote = "O login social abre a página oficial do provedor para concluir a autenticação. "
-                + "O BrasilTvLive não coleta e não envia suas credenciais.";
-        String providerNotice = "A página oficial usa recursos que não existem no Android System WebView desta TV. "
-                + "A interface abaixo mantém o fluxo navegável; o login social será concluído no navegador oficial.";
+        String providerNotice = "O login e a sessão serão conduzidos pelo navegador e pela página oficial do provedor. "
+                + "O BrasilTvLive não coleta nem armazena suas credenciais.";
         StringBuilder html = new StringBuilder();
         html.append("<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>")
                 .append("<meta name='viewport' content='width=device-width,initial-scale=1'>")
                 .append("<style>")
-                .append("*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#000;color:#f5f7fb;font-family:Arial,sans-serif}body{overflow-y:auto;padding:28px 5vw 60px}.top{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:36px}.brand{font-size:28px;font-weight:800;letter-spacing:-.04em}.brand.record{color:#fff}.brand.record:before{content:'▶';color:#ec168c;margin-right:10px}.brand.globo{color:#fff}.signup{color:#ff0a96;font-size:18px;font-weight:700}.layout{width:min(720px,100%);margin:0 auto}.eyebrow{color:#ff0a96;text-transform:uppercase;letter-spacing:.14em;font-size:13px;font-weight:800;margin-bottom:12px}.title{font-size:34px;font-weight:500;margin:0 0 30px}.subtitle{color:#b7c2d1;font-size:17px;line-height:1.5;margin:-16px 0 28px}.field{display:grid;gap:9px;margin:18px 0}.field label{font-size:17px}.field input{width:100%;height:58px;border:1px solid #616b76;border-radius:10px;background:#1b1b1b;color:#fff;padding:0 18px;font-size:20px}.field input:focus,button:focus,a:focus{outline:4px solid #42a5ff;outline-offset:3px}.remember{display:flex;align-items:center;gap:10px;margin:18px 0 26px;font-size:18px}.remember input{width:22px;height:22px}.primary,.social,.secondary{width:100%;min-height:54px;border:0;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer}.primary{background:#4a4a4a;color:#fff}.secondary{background:transparent;border:1px solid #7d8b9b;color:#fff;margin-top:12px}.reset{display:block;text-align:center;color:#ff0a96;font-size:18px;font-weight:700;margin:28px 0;text-decoration:none}.socials{display:grid;grid-template-columns:1fr 1fr;gap:16px}.social{background:#fff;color:#111}.globo-card{border:1px solid #65707c;border-radius:10px;padding:24px;margin-top:34px;color:#e5ebf1}.globo-card h2{font-size:20px;margin:0 0 18px}.globo-card p{font-size:17px;line-height:1.5;margin:10px 0}.notice{margin-top:34px;border:1px solid #394452;border-radius:12px;padding:18px;color:#aeb9c6;font-size:14px;line-height:1.5}.notice strong{display:block;color:#fff;font-size:15px;margin-bottom:6px}.channel{color:#fff;font-size:16px;margin-bottom:20px}")
+                .append("*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#000;color:#f5f7fb;font-family:Arial,sans-serif}body{overflow-y:auto;padding:28px 5vw 60px}.top{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:36px}.brand{font-size:28px;font-weight:800;letter-spacing:-.04em}.brand.record{color:#fff}.brand.record:before{content:'▶';color:#ec168c;margin-right:10px}.brand.globo{color:#fff}.signup{color:#ff0a96;font-size:18px;font-weight:700}.layout{width:min(720px,100%);margin:0 auto}.eyebrow{color:#ff0a96;text-transform:uppercase;letter-spacing:.14em;font-size:13px;font-weight:800;margin-bottom:12px}.title{font-size:34px;font-weight:500;margin:0 0 30px}.subtitle{color:#b7c2d1;font-size:17px;line-height:1.5;margin:-16px 0 28px}.primary,.secondary{width:100%;min-height:54px;border:0;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer}.primary{background:#4a4a4a;color:#fff}.primary:focus,.secondary:focus{outline:4px solid #42a5ff;outline-offset:3px}.secondary{background:transparent;border:1px solid #7d8b9b;color:#fff;margin-top:12px}.globo-card{border:1px solid #65707c;border-radius:10px;padding:24px;margin-top:34px;color:#e5ebf1}.globo-card h2{font-size:20px;margin:0 0 18px}.globo-card p{font-size:17px;line-height:1.5;margin:10px 0}.notice{margin-top:34px;border:1px solid #394452;border-radius:12px;padding:18px;color:#aeb9c6;font-size:14px;line-height:1.5}.notice strong{display:block;color:#fff;font-size:15px;margin-bottom:6px}.channel{color:#fff;font-size:16px;margin-bottom:20px}")
                 .append("</style></head><body>")
                 .append("<header class='top'><div class='brand ").append("globoplay".equals(providerId) ? "globo" : "record").append("'>")
                 .append(brand).append("</div><div class='signup'>Cadastre-se</div></header>")
@@ -822,35 +822,17 @@ public final class MainActivity extends Activity {
                 .append("<h1 class='title'>").append("globoplay".equals(providerId) ? "Conta Globo" : "Entre na sua conta").append("</h1>")
                 .append("<p class='subtitle'>Conclua o login para abrir ").append(escapeHtml(channelName)).append(".</p>");
         if ("globoplay".equals(providerId)) {
-            html.append("<p class='subtitle'>A autenticação acontece somente na página oficial da Conta Globo.</p>")
-                    .append("<button class='primary' onclick=\"openOfficial('password')\">Abrir login oficial</button>")
-                    .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou escolha uma opção na página oficial:</p>")
-                    .append(buildProviderSocialButtons(authConfig))
+            html.append("<p class='subtitle'>Na página oficial da Conta Globo, escolha uma forma de acesso disponível para sua conta.</p>")
+                    .append("<button class='primary' onclick=\"openOfficial()\">Abrir login oficial da Conta Globo</button>")
                     .append("<div class='globo-card'><h2>Por que ter uma Conta Globo?</h2><p>✓ A Conta Globo é gratuita, basta se cadastrar e acessar.</p><p>✓ Use o mesmo login para todos os produtos Globo e parceiros.</p></div>");
         } else {
-            html.append("<p class='subtitle'>Escolha uma opção para abrir o login oficial do RecordPlus. Os campos de e-mail e senha serão exibidos pelo próprio provedor.</p>")
-                    .append("<button class='primary' onclick=\"openOfficial('password')\">Abrir login oficial</button>")
-                    .append("<p class='subtitle' style='text-align:center;margin:34px 0 18px'>Ou abra o login social oficial:</p>")
-                    .append(buildProviderSocialButtons(authConfig));
+            html.append("<p class='subtitle'>Use uma das formas de acesso oferecidas pelo RecordPlus na página oficial.</p>")
+                    .append("<button class='primary' onclick=\"openOfficial()\">Abrir login oficial do RecordPlus</button>");
         }
-        html.append("<div class='notice'><strong>Login oficial ").append(provider).append("</strong>").append(providerNotice).append("<br><br>").append(socialNote).append("</div>")
+        html.append("<div class='notice'><strong>Login oficial ").append(provider).append("</strong>").append(providerNotice).append("</div>")
                 .append("<button class='secondary' onclick=\"AndroidBrasilTvLive.closeProviderSurface()\">Voltar para os canais</button>")
-                .append("</main><script>var providerUrl='").append(escapeJavaScript(providerUrl)).append("';function openOfficial(mode){if(mode==='password'){AndroidBrasilTvLive.openProviderInternal(providerUrl);}else{AndroidBrasilTvLive.openProviderExternal(providerUrl);}}</script></body></html>");
+                .append("</main><script>var providerUrl='").append(escapeJavaScript(providerUrl)).append("';function openOfficial(){AndroidBrasilTvLive.openProviderExternal(providerUrl);}</script></body></html>");
         return html.toString();
-    }
-
-    private String buildProviderSocialButtons(ProviderAuthConfig authConfig) {
-        if (authConfig == null || authConfig.socialProviders().isEmpty()) return "";
-        StringBuilder buttons = new StringBuilder("<div class='socials'>");
-        for (String socialProvider : authConfig.socialProviders()) {
-            String mark = "google".equals(socialProvider) ? "G" : "facebook".equals(socialProvider) ? "f" : "●";
-            String label = "google".equals(socialProvider) ? "Google"
-                    : "facebook".equals(socialProvider) ? "Facebook" : "Apple";
-            buttons.append("<button class='social' onclick=\"openOfficial('social')\">")
-                    .append(mark).append("&nbsp;&nbsp; Continuar com ").append(label)
-                    .append("</button>");
-        }
-        return buttons.append("</div>").toString();
     }
 
     private String escapeHtml(String value) {
