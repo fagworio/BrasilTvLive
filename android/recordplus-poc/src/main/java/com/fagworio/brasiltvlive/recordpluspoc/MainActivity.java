@@ -1,5 +1,7 @@
 package com.fagworio.brasiltvlive.recordpluspoc;
 
+import com.fagworio.brasiltvlive.recordpluspoc.auth.ProviderAuthConfig;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.Manifest;
@@ -641,55 +643,14 @@ public final class MainActivity extends Activity {
                 || normalized.contains("/ao-vivo?");
     }
 
-    private boolean isGoogleAuthUrl(Uri uri) {
-        String host = uri == null ? null : uri.getHost();
-        return host != null && ("accounts.google.com".equalsIgnoreCase(host)
-                || host.endsWith(".accounts.google.com"));
-    }
-
-    private boolean isSocialAuthUrl(Uri uri) {
-        String host = uri == null ? null : uri.getHost();
-        if (host == null) return false;
-        return isGoogleAuthUrl(uri)
-                || "appleid.apple.com".equalsIgnoreCase(host)
-                || host.endsWith(".appleid.apple.com")
-                || "facebook.com".equalsIgnoreCase(host)
-                || host.endsWith(".facebook.com");
-    }
-
-    private boolean isAllowedSocialAuthUrl(String providerId, Uri uri) {
-        String host = uri == null ? null : uri.getHost();
-        if (host == null) return false;
-        host = host.toLowerCase(java.util.Locale.ROOT);
-        if ("recordplus".equals(providerId)) {
-            return isGoogleAuthUrl(uri)
-                    || "appleid.apple.com".equals(host)
-                    || host.endsWith(".appleid.apple.com");
-        }
-        if ("globoplay".equals(providerId)) {
-            return isGoogleAuthUrl(uri)
-                    || "facebook.com".equals(host)
-                    || host.endsWith(".facebook.com");
-        }
-        return false;
-    }
-
     private boolean isAllowedProviderUrl(String providerId, Uri uri, boolean external) {
-        if (providerId == null || providerId.trim().isEmpty()) return false;
-        if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
-        String host = uri.getHost();
-        if (host == null) return false;
-        host = host.toLowerCase(java.util.Locale.ROOT);
+        ProviderAuthConfig config = ProviderAuthConfig.forId(providerId);
+        return config != null && config.allowsUrl(uri, external);
+    }
 
-        if ("recordplus".equals(providerId)) {
-            if (host.equals("recordplus.com") || host.endsWith(".recordplus.com")) return true;
-        }
-        if ("globoplay".equals(providerId)) {
-            if (host.equals("globoplay.globo.com")
-                    || host.equals("login.globo.com")
-                    || host.equals("conta.globo.com")) return true;
-        }
-        return external && isAllowedSocialAuthUrl(providerId, uri);
+    private boolean isProviderSocialAuthUrl(String providerId, Uri uri) {
+        ProviderAuthConfig config = ProviderAuthConfig.forId(providerId);
+        return config != null && config.allowsSocialAuthUrl(uri);
     }
 
     private boolean openProviderInCustomTab(Uri uri) {
@@ -1334,7 +1295,7 @@ public final class MainActivity extends Activity {
                 Log.w(TAG, "Blocking untrusted provider navigation: " + uri);
                 return true;
             }
-            if (isSocialAuthUrl(uri)) {
+            if (isProviderSocialAuthUrl(providerId, uri)) {
                 openProviderInSecureBrowser(uri, "login social");
                 return true;
             }
@@ -1348,7 +1309,7 @@ public final class MainActivity extends Activity {
                 Log.w(TAG, "Blocking untrusted provider navigation: " + uri);
                 return true;
             }
-            if (isSocialAuthUrl(uri)) {
+            if (isProviderSocialAuthUrl(providerId, uri)) {
                 openProviderInSecureBrowser(uri, "login social");
                 return true;
             }

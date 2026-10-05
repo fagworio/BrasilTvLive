@@ -8,6 +8,7 @@ import {
   normalizeProviderEvent,
   shouldResumeProviderChannel,
 } from './providerLifecycle';
+import { getProviderAuthCapabilities, supportsProviderBrowserAuth } from './providerAuth';
 import {
   Baby,
   Clapperboard,
@@ -146,6 +147,7 @@ const accountProviders = {
     mark: 'globo',
     fallbackUrl: GLOBO_LIVE_URL,
     desktopSurface: true,
+    auth: getProviderAuthCapabilities('globoplay'),
   },
   recordplus: {
     id: 'recordplus',
@@ -154,6 +156,7 @@ const accountProviders = {
     embedStatus: 'blocked',
     fallbackUrl: RECORDPLUS_LOGIN_URL,
     desktopSurface: true,
+    auth: getProviderAuthCapabilities('recordplus'),
   },
 };
 
@@ -2266,6 +2269,10 @@ function App() {
   const openProviderLogin = ({ providerId, channelUrl = null, channelName = null }) => {
     const provider = accountProviders[providerId];
     if (!provider?.fallbackUrl) return;
+    if (!supportsProviderBrowserAuth(providerId)) {
+      setAccountNotice(`O navegador seguro ainda não está disponível para ${provider.label}.`);
+      return;
+    }
 
     const desktop = getDesktopBridge();
     if (desktop?.isDesktop) {
