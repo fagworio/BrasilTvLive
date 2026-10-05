@@ -38,6 +38,8 @@ import android.view.TextureView;
 import androidx.browser.customtabs.CustomTabsClient;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.webkit.WebViewAssetLoader;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
@@ -57,6 +59,14 @@ public final class MainActivity extends Activity {
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
     private static final long EXTERNAL_AUTH_TTL_MS = 15 * 60 * 1000L;
     private static final long PLAYER_ROUTE_STABILITY_MS = 1500L;
+    private static final String RECORDPLUS_COMPATIBILITY_SCRIPT =
+            "(function(){'use strict';"
+                    + "if(!Array.prototype.toSorted){Object.defineProperty(Array.prototype,'toSorted',{configurable:true,writable:true,value:function(compareFn){return Array.prototype.slice.call(this).sort(compareFn);}});}"
+                    + "if(typeof AbortSignal!=='undefined'){"
+                    + "if(!AbortSignal.timeout){AbortSignal.timeout=function(delay){var controller=new AbortController();setTimeout(function(){controller.abort(new DOMException('The operation timed out.','TimeoutError'));},delay);return controller.signal;};}"
+                    + "if(!AbortSignal.any){AbortSignal.any=function(signals){var controller=new AbortController();if(!signals||!signals.length)return controller.signal;var finish=function(signal){if(controller.signal.aborted)return;controller.abort(signal&&signal.reason);};signals.forEach(function(signal){if(signal.aborted)finish(signal);else signal.addEventListener('abort',function(){finish(signal);},{once:true});});return controller.signal;};}"
+                    + "}"
+                    + "window.__brasiltvliveRecordPlusCompatibility=true;})();";
 
     private FrameLayout root;
     private WebView appWebView;
@@ -345,15 +355,15 @@ public final class MainActivity extends Activity {
                 return;
             }
 
-            // Android TV login must use the deterministic TV form. Provider
-            // login SPAs can remain on an endless loader even when the TV has
-            // a newer WebView, while the official player still needs the
-            // provider surface for playback. Keep the compatibility form
-            // limited to authentication and legacy WebViews.
+            // Use the official provider page on Android TV whenever the
+            // embedded engine can run it. Keep the deterministic compatibility
+            // form only for legacy engines, or for RecordPlus when its
+            // document-start compatibility adapter cannot be installed.
             providerCompatibilitySurface = hasLegacyProviderWebView()
-                    || (isTelevisionDevice() && "login".equals(mode));
+                    || ("recordplus".equals(providerId)
+                    && !installRecordPlusCompatibilityScript());
             if (providerCompatibilitySurface) {
-                Log.w(TAG, "Legacy Android WebView detected; using provider compatibility surface for " + providerId);
+                Log.w(TAG, "Using provider compatibility surface for " + providerId);
                 providerWebView.addJavascriptInterface(new ProviderBridge(), "AndroidBrasilTvLive");
                 providerWebView.loadDataWithBaseURL(
                         providerId.equals("globoplay") ? "https://globoplay.globo.com" : "https://www.recordplus.com",
@@ -446,6 +456,29 @@ public final class MainActivity extends Activity {
         }
         providerWebView.loadUrl(url);
         providerWebView.requestFocus(View.FOCUS_FORWARD);
+    }
+
+    /**
+     * Installs only the RecordPlus APIs proven missing on the old TV runtime.
+     * The script runs before the provider bundle when AndroidX WebKit exposes
+     * DOCUMENT_START_SCRIPT; otherwise the caller keeps the safe fallback UI.
+     */
+    private boolean installRecordPlusCompatibilityScript() {
+        if (providerWebView == null) return false;
+        boolean supported = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT);
+        Log.i(TAG, "RecordPlus document-start support: " + supported);
+        if (!supported) return false;
+        try {
+            java.util.Set<String> allowedOrigins = new java.util.HashSet<>();
+            allowedOrigins.add("https://recordplus.com");
+            allowedOrigins.add("https://*.recordplus.com");
+            WebViewCompat.addDocumentStartJavaScript(
+                    providerWebView, RECORDPLUS_COMPATIBILITY_SCRIPT, allowedOrigins);
+            return true;
+        } catch (RuntimeException exception) {
+            Log.w(TAG, "Could not install RecordPlus document-start compatibility script", exception);
+            return false;
+        }
     }
 
     private void closeProvider(String reason) {
