@@ -7,7 +7,15 @@ const PROVIDER_REGISTRY = Object.freeze({
   }),
   globoplay: Object.freeze({
     primaryOrigins: Object.freeze(['https://globoplay.globo.com']),
-    authOrigins: Object.freeze(['https://login.globo.com']),
+    // Globoplay owns the OIDC/PKCE parameters. The app enters through the
+    // requested Globoplay channel and permits only the official hops that
+    // browser navigation needs to complete that provider-managed flow.
+    authOrigins: Object.freeze([
+      'https://goidc.globo.com',
+      'https://authx.globoid.globo.com',
+      'https://conta.globo.com',
+      'https://accounts.google.com',
+    ]),
   }),
 });
 

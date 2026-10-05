@@ -11,13 +11,17 @@ const globoplay = require('../electron/providers/globoplay.cjs');
 test('allows provider pages and their configured auth origins', () => {
   assert.equal(isAllowedProviderUrl('recordplus', 'https://www.recordplus.com/login'), true);
   assert.equal(isAllowedProviderUrl('recordplus', 'https://accounts.google.com/o/oauth2/auth'), true);
-  assert.equal(isAllowedProviderUrl('globoplay', 'https://login.globo.com/login'), true);
+  assert.equal(isAllowedProviderUrl('globoplay', 'https://globoplay.globo.com/tv-globo/ao-vivo/7832875/'), true);
+  assert.equal(isAllowedProviderUrl('globoplay', 'https://goidc.globo.com/authorize'), true);
+  assert.equal(isAllowedProviderUrl('globoplay', 'https://authx.globoid.globo.com/6888/login'), true);
+  assert.equal(isAllowedProviderUrl('globoplay', 'https://accounts.google.com/o/oauth2/auth'), true);
 });
 
 test('rejects unknown, insecure, and unrelated provider URLs', () => {
   assert.equal(isAllowedProviderUrl('unknown', 'https://example.com'), false);
   assert.equal(isAllowedProviderUrl('recordplus', 'http://www.recordplus.com/login'), false);
   assert.equal(isAllowedProviderUrl('recordplus', 'https://evil.example/redirect'), false);
+  assert.equal(isAllowedProviderUrl('globoplay', 'https://login.globo.com/login'), false);
   assert.equal(isAllowedProviderUrl('globoplay', 'https://www.recordplus.com/player/foo'), false);
 });
 
@@ -55,7 +59,8 @@ test('classifies Globoplay regional player and login surfaces', () => {
   const channelUrl = 'https://globoplay.globo.com/ao-vivo/globo-minas/';
   assert.equal(globoplay.isPlayerUrl(channelUrl, channelUrl), true);
   assert.equal(globoplay.isHomeUrl('https://globoplay.globo.com/'), true);
-  assert.equal(globoplay.isLoginUrl('https://login.globo.com/login'), true);
+  assert.equal(globoplay.isLoginUrl('https://goidc.globo.com/authorize'), true);
+  assert.equal(globoplay.isLoginUrl('https://authx.globoid.globo.com/6888/login'), true);
   assert.equal(globoplay.isLoginSurface({ providerId: 'globoplay', mode: 'login', channelUrl }, 'https://globoplay.globo.com/'), true);
   assert.equal(globoplay.isLoginSurface({ providerId: 'globoplay', mode: 'player', channelUrl }, 'https://globoplay.globo.com/'), false);
 });

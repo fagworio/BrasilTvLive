@@ -119,7 +119,6 @@ const regionOptions = [
 ];
 
 const GLOBO_LIVE_URL = 'https://globoplay.globo.com/tv-globo/ao-vivo/7832875/';
-const GLOBO_LOGIN_URL = 'https://login.globo.com/login/1';
 const GLOBO_REGION_CATALOG_URLS = {
   'mg-bh': 'https://globoplay.globo.com/categorias/globo-minas/',
   'mg-uberlandia': 'https://globoplay.globo.com/categorias/tv-integracao/',
@@ -185,11 +184,10 @@ function getRecordPlusLoginUrl(channelUrl) {
 
 function getProviderLoginUrl(providerId, channelUrl) {
   if (providerId === 'recordplus') return getRecordPlusLoginUrl(channelUrl);
-  if (providerId === 'globoplay') {
-    const loginUrl = new URL(GLOBO_LOGIN_URL);
-    loginUrl.searchParams.set('url', channelUrl || GLOBO_LIVE_URL);
-    return loginUrl.toString();
-  }
+  // login.globo.com/login/1 was retired. Starting at the protected
+  // Globoplay channel lets Globoplay create its current OIDC/PKCE request
+  // when the visitor has no session, without us manufacturing auth params.
+  if (providerId === 'globoplay') return channelUrl || GLOBO_LIVE_URL;
   return accountProviders[providerId]?.fallbackUrl || channelUrl;
 }
 

@@ -822,8 +822,8 @@ public final class MainActivity extends Activity {
                 .append("<h1 class='title'>").append("globoplay".equals(providerId) ? "Conta Globo" : "Entre na sua conta").append("</h1>")
                 .append("<p class='subtitle'>Conclua o login para abrir ").append(escapeHtml(channelName)).append(".</p>");
         if ("globoplay".equals(providerId)) {
-            html.append("<p class='subtitle'>Na página oficial da Conta Globo, escolha uma forma de acesso disponível para sua conta.</p>")
-                    .append("<button class='primary' onclick=\"openOfficial()\">Abrir login oficial da Conta Globo</button>")
+            html.append("<p class='subtitle'>Abra o canal no Globoplay. Se necessário, o próprio Globoplay iniciará o login oficial da Conta Globo.</p>")
+                    .append("<button class='primary' onclick=\"openOfficial()\">Abrir Globoplay para entrar</button>")
                     .append("<div class='globo-card'><h2>Por que ter uma Conta Globo?</h2><p>✓ A Conta Globo é gratuita, basta se cadastrar e acessar.</p><p>✓ Use o mesmo login para todos os produtos Globo e parceiros.</p></div>");
         } else {
             html.append("<p class='subtitle'>Use uma das formas de acesso oferecidas pelo RecordPlus na página oficial.</p>")

@@ -29,7 +29,10 @@ function isHomeUrl(value) {
 
 function isLoginUrl(value) {
   try {
-    return new URL(value).hostname === 'login.globo.com';
+    const hostname = new URL(value).hostname;
+    return hostname === 'goidc.globo.com'
+      || hostname === 'authx.globoid.globo.com'
+      || hostname === 'conta.globo.com';
   } catch {
     return false;
   }

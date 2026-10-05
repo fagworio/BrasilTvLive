@@ -42,7 +42,11 @@ public final class ProviderAuthConfig {
         if ("globoplay".equals(providerId)) {
             return new ProviderAuthConfig(
                     "globoplay",
-                    Arrays.asList("globoplay.globo.com", "login.globo.com", "conta.globo.com"),
+                    // Begin at the protected Globoplay channel. These are
+                    // the provider-owned OIDC hops observed in the current
+                    // login journey; PKCE parameters remain provider-owned.
+                    Arrays.asList("globoplay.globo.com", "goidc.globo.com",
+                            "authx.globoid.globo.com", "conta.globo.com"),
                     Collections.singletonList("accounts.google.com"),
                     Collections.singletonList("google"));
         }
